@@ -3,6 +3,8 @@ import { cacheGet } from '../../../services/cache-manager.js';
 import { enforceClientRateLimit } from '../../../services/rate-limiter.js';
 import { postgrestSelect } from '../../../services/postgrest-client.js';
 import { errors } from '../../../utils/errors.js';
+import type { BazaarProductData } from '../../../workers/bazaar-tracker.js';
+import type { HypixelBazaarProduct } from '../../../types/hypixel.js';
 
 interface BazaarParams {
   itemId: string;
@@ -12,26 +14,9 @@ interface HistoryQuery {
   range?: '1h' | '6h' | '24h' | '7d' | '30d';
 }
 
-interface BazaarProductData {
+interface RawSnapshotRow {
   item_id: string;
-  buy_price: number;
-  sell_price: number;
-  buy_volume: number;
-  sell_volume: number;
-  buy_orders: number;
-  sell_orders: number;
-  buy_moving_week: number;
-  sell_moving_week: number;
-}
-
-interface BazaarSnapshotRow {
-  item_id: string;
-  buy_price: number;
-  sell_price: number;
-  buy_volume: number;
-  sell_volume: number;
-  buy_orders: number;
-  sell_orders: number;
+  raw_data: HypixelBazaarProduct;
   recorded_at: string;
 }
 
@@ -52,7 +37,7 @@ const RANGE_TO_RESOLUTION: Record<string, string> = {
 };
 
 export async function bazaarRoute(app: FastifyInstance): Promise<void> {
-  // GET /v1/skyblock/bazaar/:itemId — current price data
+  // GET /v1/skyblock/bazaar/:itemId — current price data from warm cache
   app.get<{ Params: BazaarParams }>(
     '/v1/skyblock/bazaar/:itemId',
     {
@@ -83,7 +68,7 @@ export async function bazaarRoute(app: FastifyInstance): Promise<void> {
     },
   );
 
-  // GET /v1/skyblock/bazaar/:itemId/history — price history
+  // GET /v1/skyblock/bazaar/:itemId/history — price history computed from raw snapshots
   app.get<{ Params: BazaarParams; Querystring: HistoryQuery }>(
     '/v1/skyblock/bazaar/:itemId/history',
     {
@@ -111,36 +96,42 @@ export async function bazaarRoute(app: FastifyInstance): Promise<void> {
       const interval = RANGE_TO_INTERVAL[range] ?? '24 hours';
       const resolution = RANGE_TO_RESOLUTION[range] ?? '5m';
 
-      let rows: BazaarSnapshotRow[];
+      let rows: RawSnapshotRow[];
       try {
-        rows = await postgrestSelect<BazaarSnapshotRow>({
+        rows = await postgrestSelect<RawSnapshotRow>({
           table: 'bazaar_snapshots',
           query: {
             item_id: `eq.${itemId}`,
             recorded_at: `gte.${new Date(Date.now() - parseDuration(interval)).toISOString()}`,
           },
           order: 'recorded_at.asc',
-          select: 'item_id,buy_price,sell_price,buy_volume,sell_volume,buy_orders,sell_orders,recorded_at',
+          select: 'item_id,raw_data,recorded_at',
         });
       } catch {
         rows = [];
       }
 
-      const datapoints = rows.map((row) => ({
-        timestamp: new Date(row.recorded_at).getTime(),
-        buy_price: row.buy_price,
-        sell_price: row.sell_price,
-        buy_volume: row.buy_volume,
-        sell_volume: row.sell_volume,
-      }));
+      const datapoints = rows.map((row) => {
+        const raw = row.raw_data;
+        const qs = raw.quick_status;
+        return {
+          timestamp: new Date(row.recorded_at).getTime(),
+          instant_buy_price: raw.sell_summary?.[0]?.pricePerUnit ?? qs.buyPrice,
+          instant_sell_price: raw.buy_summary?.[0]?.pricePerUnit ?? qs.sellPrice,
+          avg_buy_price: qs.buyPrice,
+          avg_sell_price: qs.sellPrice,
+          buy_volume: qs.buyVolume,
+          sell_volume: qs.sellVolume,
+        };
+      });
 
       const count = datapoints.length;
-      const avg_buy_price = count > 0
-        ? Math.round((datapoints.reduce((sum, d) => sum + d.buy_price, 0) / count) * 100) / 100
-        : null;
-      const avg_sell_price = count > 0
-        ? Math.round((datapoints.reduce((sum, d) => sum + d.sell_price, 0) / count) * 100) / 100
-        : null;
+      const summary = count > 0 ? {
+        avg_instant_buy: Math.round((datapoints.reduce((s, d) => s + d.instant_buy_price, 0) / count) * 100) / 100,
+        avg_instant_sell: Math.round((datapoints.reduce((s, d) => s + d.instant_sell_price, 0) / count) * 100) / 100,
+        avg_buy: Math.round((datapoints.reduce((s, d) => s + d.avg_buy_price, 0) / count) * 100) / 100,
+        avg_sell: Math.round((datapoints.reduce((s, d) => s + d.avg_sell_price, 0) / count) * 100) / 100,
+      } : null;
 
       return {
         success: true,
@@ -149,8 +140,7 @@ export async function bazaarRoute(app: FastifyInstance): Promise<void> {
           range,
           resolution,
           count,
-          avg_buy_price,
-          avg_sell_price,
+          summary,
           datapoints,
         },
         meta: { cached: false, cache_age_seconds: null, timestamp: Date.now() },
