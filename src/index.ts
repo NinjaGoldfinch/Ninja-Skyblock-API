@@ -3,6 +3,7 @@ import { env } from './config/env.js';
 import { AppError } from './utils/errors.js';
 import { closeRedis } from './utils/redis.js';
 import { profileRoute } from './routes/v1/skyblock/profile.js';
+import { authPlugin } from './plugins/auth.js';
 
 const app = Fastify();
 
@@ -33,6 +34,9 @@ app.setErrorHandler((error, _request, reply) => {
     meta: { timestamp: Date.now() },
   });
 });
+
+// Auth
+app.register(authPlugin);
 
 // Routes
 app.register(profileRoute);
