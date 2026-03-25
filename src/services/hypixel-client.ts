@@ -6,6 +6,7 @@ import { createLogger } from '../utils/logger.js';
 import type {
   HypixelProfilesResponse, HypixelProfileResponse, HypixelBazaarResponse,
   HypixelAuctionsPageResponse, HypixelPlayerAuctionsResponse, HypixelEndedAuctionsResponse,
+  HypixelCollectionsResponse, HypixelSkillsResponse, HypixelItemsResponse, HypixelElectionResponse,
 } from '../types/hypixel.js';
 
 const log = createLogger('hypixel-client');
@@ -132,6 +133,30 @@ export async function fetchPlayerAuctions(playerUuid: string): Promise<HypixelPl
 export async function fetchEndedAuctions(): Promise<HypixelEndedAuctionsResponse> {
   return fetchHypixel<HypixelEndedAuctionsResponse>({
     endpoint: '/v2/skyblock/auctions_ended',
+  });
+}
+
+export async function fetchCollections(): Promise<HypixelCollectionsResponse> {
+  return fetchHypixel<HypixelCollectionsResponse>({
+    endpoint: '/v2/resources/skyblock/collections',
+  });
+}
+
+export async function fetchSkills(): Promise<HypixelSkillsResponse> {
+  return fetchHypixel<HypixelSkillsResponse>({
+    endpoint: '/v2/resources/skyblock/skills',
+  });
+}
+
+export async function fetchItems(): Promise<HypixelItemsResponse> {
+  return fetchHypixel<HypixelItemsResponse>({
+    endpoint: '/v2/resources/skyblock/items',
+  });
+}
+
+export async function fetchElection(): Promise<HypixelElectionResponse> {
+  return fetchHypixel<HypixelElectionResponse>({
+    endpoint: '/v2/resources/skyblock/election',
   });
 }
 

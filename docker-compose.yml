@@ -56,6 +56,14 @@ services:
     <<: *worker-common
     command: ["node", "dist/worker-profiles.js"]
 
+  worker-auction-sold:
+    <<: *worker-common
+    command: ["node", "dist/worker-auction-sold.js"]
+
+  worker-resources:
+    <<: *worker-common
+    command: ["node", "dist/worker-resources.js"]
+
   postgrest:
     image: postgrest/postgrest
     ports:

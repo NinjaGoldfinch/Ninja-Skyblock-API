@@ -151,3 +151,94 @@ export interface HypixelAuctionsPageResponse {
   lastUpdated: number;
   auctions: HypixelAuction[];
 }
+
+// Resource endpoints (static/semi-static reference data)
+
+export interface HypixelCollectionsResponse {
+  success: boolean;
+  lastUpdated: number;
+  version: string;
+  collections: Record<string, {
+    name: string;
+    maxTiers: number;
+    items: Record<string, {
+      name: string;
+      maxTiers: number;
+      tiers: Array<{
+        tier: number;
+        amountRequired: number;
+        unlocks: string[];
+      }>;
+    }>;
+  }>;
+}
+
+export interface HypixelSkillsResponse {
+  success: boolean;
+  lastUpdated: number;
+  version: string;
+  skills: Record<string, {
+    name: string;
+    description: string;
+    maxLevel: number;
+    levels: Array<{
+      level: number;
+      totalExpRequired: number;
+      unlocks: string[];
+    }>;
+  }>;
+}
+
+export interface HypixelItemsResponse {
+  success: boolean;
+  lastUpdated: number;
+  items: Array<{
+    id: string;
+    material: string;
+    name: string;
+    tier?: string;
+    category?: string;
+    npc_sell_price?: number;
+    color?: string;
+    skin?: string;
+    museum?: boolean;
+    [key: string]: unknown;
+  }>;
+}
+
+export interface HypixelElectionResponse {
+  success: boolean;
+  lastUpdated: number;
+  mayor: {
+    key: string;
+    name: string;
+    perks: Array<{
+      name: string;
+      description: string;
+    }>;
+    election: {
+      year: number;
+      candidates: Array<{
+        key: string;
+        name: string;
+        perks: Array<{
+          name: string;
+          description: string;
+        }>;
+        votes: number;
+      }>;
+    };
+  };
+  current?: {
+    year: number;
+    candidates: Array<{
+      key: string;
+      name: string;
+      perks: Array<{
+        name: string;
+        description: string;
+      }>;
+      votes: number;
+    }>;
+  };
+}
