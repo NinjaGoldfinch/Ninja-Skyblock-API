@@ -181,11 +181,26 @@ Connect to `ws://localhost:3000/v1/events/subscribe` and send JSON messages:
 
 ## Background Workers
 
-| Worker | Interval | Description |
-|--------|----------|-------------|
-| Bazaar Tracker | 60s | Polls all bazaar products, caches prices, stores raw data to Postgres, publishes price change events |
-| Auction Scanner | 45s | Scans all auction pages, tracks lowest BINs, publishes new-lowest and ending-soon events |
-| Profile Tracker | 5min | Polls watched players, diffs skill averages, stores snapshots, publishes change events |
+Workers run as separate Docker services from the API server. Each can be independently started, stopped, scaled, or deployed to different machines. They communicate with the API through Redis (cache + pub/sub) and PostgREST (Postgres).
+
+| Service | Polls | Description |
+|---------|-------|-------------|
+| `worker-bazaar` | 1s (conditional) | Polls bazaar, skips if unchanged, caches prices, stores raw data, publishes events |
+| `worker-auctions` | 1s (conditional) | Polls auctions page 0, fetches all pages only on change, tracks lowest BINs |
+| `worker-profiles` | 5min | Polls watched players, diffs skill averages, stores snapshots |
+
+Workers use `If-Modified-Since` headers to avoid re-parsing data that hasn't changed. A typical idle poll is <10ms.
+
+```bash
+# Start only specific workers
+docker compose up worker-bazaar worker-auctions
+
+# Restart a crashed worker without touching the API
+docker compose restart worker-auctions
+
+# Run a worker locally for development
+npm run dev:worker:bazaar
+```
 
 ## Environment Variables
 
@@ -214,18 +229,23 @@ See [.env.example](.env.example) for all variables. Required:
 
 ```
 src/
-  config/       Environment vars, constants
-  routes/v1/    REST endpoints (skyblock, admin, events, docs)
-  services/     Hypixel client, cache, rate limiter, event bus, PostgREST
-  workers/      BullMQ background jobs (bazaar, auctions, profiles)
-  processors/   Pure functions (skills, networth computation)
-  plugins/      Fastify plugins (auth, swagger)
-  schemas/      Shared JSON schemas for OpenAPI
-  types/        TypeScript type definitions
-  utils/        Redis, queue, logger, error utilities
-migrations/     SQL schema migrations
-sql/            Init scripts and Postgres functions
-tests/          Unit and integration tests
+  index.ts              API server entry point (Fastify, no workers)
+  worker-bazaar.ts      Bazaar worker entry point
+  worker-auctions.ts    Auction worker entry point
+  worker-profiles.ts    Profile worker entry point
+  config/               Environment vars, constants
+  routes/v1/            Raw Hypixel proxy endpoints
+  routes/v2/            Computed/processed endpoints
+  services/             Hypixel client, cache, rate limiter, event bus, PostgREST
+  workers/              BullMQ job processors (shared by worker entry points)
+  processors/           Pure functions (skills, networth computation)
+  plugins/              Fastify plugins (auth, swagger)
+  schemas/              Shared JSON schemas for OpenAPI
+  types/                TypeScript type definitions
+  utils/                Redis, queue, logger, error utilities
+migrations/             SQL schema migrations
+sql/                    Init scripts and Postgres functions
+tests/                  Unit and integration tests
 ```
 
 ## Scripts

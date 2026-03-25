@@ -1,3 +1,22 @@
+x-worker-common: &worker-common
+  build: .
+  depends_on:
+    redis:
+      condition: service_healthy
+    postgrest:
+      condition: service_started
+  environment: &worker-env
+    NODE_ENV: development
+    LOG_LEVEL: debug
+    REDIS_URL: redis://redis:6379
+    POSTGREST_URL: http://postgrest:3000
+    HYPIXEL_API_KEY: ${HYPIXEL_API_KEY}
+    HMAC_SECRET: ${HMAC_SECRET:-dev-secret-change-me}
+    BAZAAR_ALERT_THRESHOLD: ${BAZAAR_ALERT_THRESHOLD:-0.1}
+    HOT_CACHE_TTL: 60
+    WARM_CACHE_TTL: 300
+  restart: unless-stopped
+
 services:
   api:
     build: .
@@ -24,7 +43,18 @@ services:
       HYPIXEL_RATE_LIMIT: 120
       HOT_CACHE_TTL: 60
       WARM_CACHE_TTL: 300
-      BAZAAR_ALERT_THRESHOLD: ${BAZAAR_ALERT_THRESHOLD:-0.1}
+
+  worker-bazaar:
+    <<: *worker-common
+    command: ["node", "dist/worker-bazaar.js"]
+
+  worker-auctions:
+    <<: *worker-common
+    command: ["node", "dist/worker-auctions.js"]
+
+  worker-profiles:
+    <<: *worker-common
+    command: ["node", "dist/worker-profiles.js"]
 
   postgrest:
     image: postgrest/postgrest

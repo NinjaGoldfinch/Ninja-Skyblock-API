@@ -14,15 +14,10 @@ import { v2ProfileRoute } from './routes/v2/skyblock/profile.js';
 import { v2BazaarRoute } from './routes/v2/skyblock/bazaar.js';
 import { v2AuctionsRoute } from './routes/v2/skyblock/auctions.js';
 import { authPlugin } from './plugins/auth.js';
-import { startBazaarTracker } from './workers/bazaar-tracker.js';
-import { startAuctionScanner } from './workers/auction-scanner.js';
-import { startProfileTracker } from './workers/profile-tracker.js';
-import { closeQueues } from './utils/queue.js';
 import { sseRoute } from './routes/v1/events/stream.js';
 import { adminKeysRoute } from './routes/v1/admin/keys.js';
 import { watchedPlayersRoute } from './routes/v1/admin/watched-players.js';
 import { setupWebSocket } from './routes/v1/events/subscribe.js';
-import { closeEventBus } from './services/event-bus.js';
 import { swaggerPlugin } from './plugins/swagger.js';
 import { registerSharedSchemas } from './schemas/common.js';
 import { specRoute } from './routes/v1/docs/spec.js';
@@ -129,20 +124,12 @@ const start = async () => {
     await app.listen({ port: env.PORT, host: '0.0.0.0' });
     logger.info({ port: env.PORT }, 'Server started');
 
-    // Start background workers
-    startBazaarTracker();
-    startAuctionScanner();
-    startProfileTracker();
-    logger.info('Background workers started');
-
     // Attach WebSocket server to the underlying HTTP server
     const httpServer = app.server;
     await setupWebSocket(httpServer);
     logger.info('WebSocket server attached');
   } catch (err) {
     logger.fatal({ err }, 'Failed to start server');
-    await closeQueues();
-    await closeEventBus();
     await closeRedis();
     process.exit(1);
   }
