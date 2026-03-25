@@ -1,0 +1,30 @@
+# CLAUDE.md — Implementation Memory
+
+## Project
+ninja-skyblock-api — Backend API proxying Hypixel API for SkyBlock endpoints.
+See ARCHITECTURE.md for full specification.
+
+## Current phase
+Phase 1 Core — step 2 of 8
+
+## Completed steps
+- [x] 1. Project scaffold (package.json, tsconfig, docker-compose, directory structure)
+- [ ] 2. Environment variable parsing (src/config/env.ts)
+- [ ] 3. Hypixel API client (src/services/hypixel-client.ts)
+- [ ] 4. Cache manager (src/services/cache-manager.ts)
+- [ ] 5. Rate limiter (src/services/rate-limiter.ts)
+- [ ] 6. Profile route (GET /v1/skyblock/profile/:uuid) — end-to-end
+- [ ] 7. HMAC auth plugin (src/plugins/auth.ts)
+- [ ] 8. Processors (networth, skills)
+
+## What works
+- Step 1: `tsc --noEmit` passes, server boots with env vars set, exits cleanly on timeout
+
+## Known issues
+<!-- Bugs, edge cases, things to revisit -->
+
+## Decisions made
+<!-- Any implementation decisions that deviated from or clarified ARCHITECTURE.md -->
+
+## Next step
+Step 2: Environment variable parsing — already created env.ts as part of scaffold, will be committed with step 1.
