@@ -100,10 +100,14 @@ async function processBazaarJob(_job: Job): Promise<void> {
         await publish('bazaar:alerts', {
           type: 'bazaar:price_change',
           item_id: productId,
-          old_buy_price: previous.instant_buy_price,
-          new_buy_price: data.instant_buy_price,
-          old_sell_price: previous.instant_sell_price,
-          new_sell_price: data.instant_sell_price,
+          old_instant_buy_price: previous.instant_buy_price,
+          new_instant_buy_price: data.instant_buy_price,
+          old_instant_sell_price: previous.instant_sell_price,
+          new_instant_sell_price: data.instant_sell_price,
+          old_avg_buy_price: previous.avg_buy_price,
+          new_avg_buy_price: data.avg_buy_price,
+          old_avg_sell_price: previous.avg_sell_price,
+          new_avg_sell_price: data.avg_sell_price,
           change_pct: changePct,
           timestamp: Date.now(),
         });

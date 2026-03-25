@@ -10,10 +10,14 @@ export type EventChannel =
 export interface BazaarAlertEvent {
   type: 'bazaar:price_change';
   item_id: string;
-  old_buy_price: number;
-  new_buy_price: number;
-  old_sell_price: number;
-  new_sell_price: number;
+  old_instant_buy_price: number;
+  new_instant_buy_price: number;
+  old_instant_sell_price: number;
+  new_instant_sell_price: number;
+  old_avg_buy_price: number;
+  new_avg_buy_price: number;
+  old_avg_sell_price: number;
+  new_avg_sell_price: number;
   change_pct: number;
   timestamp: number;
 }
