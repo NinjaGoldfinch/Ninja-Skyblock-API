@@ -14,6 +14,7 @@ import { resourcesRoute } from './routes/v1/skyblock/resources.js';
 import { v2ProfileRoute } from './routes/v2/skyblock/profile.js';
 import { v2BazaarRoute } from './routes/v2/skyblock/bazaar.js';
 import { v2AuctionsRoute } from './routes/v2/skyblock/auctions.js';
+import { v2ItemsRoute } from './routes/v2/skyblock/items.js';
 import { authPlugin } from './plugins/auth.js';
 import { sseRoute } from './routes/v1/events/stream.js';
 import { adminKeysRoute } from './routes/v1/admin/keys.js';
@@ -84,6 +85,7 @@ app.register(resourcesRoute);
 app.register(v2ProfileRoute);
 app.register(v2BazaarRoute);
 app.register(v2AuctionsRoute);
+app.register(v2ItemsRoute);
 
 // Events
 app.register(sseRoute);

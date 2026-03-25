@@ -1,7 +1,7 @@
 import type { Job } from 'bullmq';
 import { getQueue, createWorker } from '../utils/queue.js';
 import { fetchAuctionsPage, fetchConditional } from '../services/hypixel-client.js';
-import { cacheSet, cacheSetBulk } from '../services/cache-manager.js';
+import { cacheGet, cacheSet, cacheSetBulk } from '../services/cache-manager.js';
 import { publish } from '../services/event-bus.js';
 import { createLogger } from '../utils/logger.js';
 import type { HypixelAuction, HypixelAuctionsPageResponse } from '../types/hypixel.js';
@@ -11,26 +11,9 @@ const QUEUE_NAME = 'auction-scanner';
 
 const ENDING_SOON_WINDOW_MS = 120_000; // 2 minutes
 
-// In-memory state for conditional polling
+// In-memory state
 let lastModifiedHeader: string | undefined;
-
-// Known reforge prefixes to strip when extracting base item name
-// Only reforges that are NEVER real item name prefixes.
-// Many reforges (Perfect, Wise, Strong, Heavy, Giant, Fierce, Legendary,
-// Mythic, Epic, Necrotic, Reinforced) are also real item set names —
-// stripping them would corrupt item names. A proper fix requires an
-// item ID lookup table (noted in CLAUDE.md).
-const REFORGE_PREFIXES = [
-  'Withered', 'Fabled', 'Heroic', 'Suspicious', 'Ancient', 'Titanic',
-  'Lucky', 'Rapid', 'Forceful', 'Hurtful',
-  'Keen', 'Spiritual', 'Odd', 'Rich', 'Gentle', 'Bizarre',
-  'Hasty', 'Unreal',
-  'Awkward', 'Spicy', 'Treacherous', 'Demonic', 'Salty', 'Silky',
-  'Bloody', 'Shaded', 'Warped', 'Loving', 'Itchy',
-  'Ominous', 'Pleasant', 'Zealous', 'Godly', 'Superior',
-  'Renowned', 'Submerged', 'Auspicious', 'Moil',
-  'Toil', 'Blooming', 'Stellar', 'Jaded', 'Sighted',
-];
+let knownItemNames: Set<string> = new Set();
 
 export interface AuctionItemData {
   item_name: string;
@@ -50,12 +33,9 @@ export interface LowestBinData {
 }
 
 /**
- * Extract a base item name by stripping reforges, stars, and formatting.
- * "Withered Hyperion ✪✪✪✪✪➎" -> "Hyperion"
- * "[Lvl 100] Baby Yeti" -> "Baby Yeti" (pet)
- * "⚚ Spiritual Bonemerang ✪✪✪✪✪" -> "Bonemerang"
+ * Strip formatting (stars, pet levels, symbols) from an auction item name.
  */
-function extractBaseItem(itemName: string): string {
+function stripFormatting(itemName: string): string {
   let name = itemName;
 
   // Strip leading special characters (⚚, etc.)
@@ -73,16 +53,37 @@ function extractBaseItem(itemName: string): string {
     name = name.slice(6);
   }
 
-  // Strip reforge prefix (first word if it's a known reforge)
-  const firstSpace = name.indexOf(' ');
+  return name.trim();
+}
+
+/**
+ * Extract a base item name by stripping formatting and reforges.
+ * Uses the known items set from the items worker to determine whether
+ * the first word is a reforge or part of the real item name.
+ *
+ * "Withered Hyperion ✪✪✪✪✪➎" -> "Hyperion"
+ * "Wise Dragon Helmet ✪✪✪✪✪" -> "Wise Dragon Helmet" (real item)
+ * "Fabled Wise Dragon Helmet" -> "Wise Dragon Helmet" (strips reforge only)
+ */
+function extractBaseItem(itemName: string): string {
+  const stripped = stripFormatting(itemName);
+
+  // If the stripped name is already a known item, return it
+  if (knownItemNames.has(stripped)) {
+    return stripped;
+  }
+
+  // Try removing the first word (potential reforge) and check if the rest is a known item
+  const firstSpace = stripped.indexOf(' ');
   if (firstSpace > 0) {
-    const firstWord = name.slice(0, firstSpace);
-    if (REFORGE_PREFIXES.includes(firstWord)) {
-      name = name.slice(firstSpace + 1);
+    const withoutFirst = stripped.slice(firstSpace + 1);
+    if (knownItemNames.has(withoutFirst)) {
+      return withoutFirst;
     }
   }
 
-  return name.trim();
+  // No match in known items — return the stripped name as-is
+  return stripped;
 }
 
 // In-memory previous lowest BINs for change detection
@@ -90,6 +91,12 @@ let previousLowestBins = new Map<string, LowestBinData>();
 
 async function processAuctionJob(_job: Job): Promise<void> {
   const startTime = Date.now();
+
+  // Refresh known item names from cache (updated by items worker)
+  const itemNamesCache = await cacheGet<string[]>('warm', 'resources', 'item-known-names');
+  if (itemNamesCache) {
+    knownItemNames = new Set(itemNamesCache.data);
+  }
 
   // Conditional fetch on page 0 — check if data has changed
   const checkResult = await fetchConditional<HypixelAuctionsPageResponse>(
