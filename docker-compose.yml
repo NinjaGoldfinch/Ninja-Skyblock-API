@@ -1,0 +1,68 @@
+services:
+  api:
+    build: .
+    ports:
+      - "3000:3000"
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      postgrest:
+        condition: service_started
+    environment:
+      PORT: 3000
+      NODE_ENV: development
+      LOG_LEVEL: debug
+      REDIS_URL: redis://redis:6379
+      POSTGREST_URL: http://postgrest:3000
+      HYPIXEL_API_KEYS: ${HYPIXEL_API_KEYS}
+      HMAC_SECRET: ${HMAC_SECRET:-dev-secret-change-me}
+      CLIENT_RATE_LIMIT: 60
+      PUBLIC_RATE_LIMIT: 30
+      HYPIXEL_RATE_LIMIT: 120
+      HOT_CACHE_TTL: 60
+      WARM_CACHE_TTL: 300
+
+  postgrest:
+    image: postgrest/postgrest
+    ports:
+      - "3001:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PGRST_DB_URI: postgresql://user:pass@postgres:5432/ninja_skyblock
+      PGRST_DB_ANON_ROLE: api_anon
+      PGRST_DB_SCHEMAS: public
+      PGRST_OPENAPI_SERVER_PROXY_URI: http://localhost:3001
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  postgres:
+    image: postgres:16-alpine
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_DB: ninja_skyblock
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: pass
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./sql/init:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U user -d ninja_skyblock"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  pgdata:
