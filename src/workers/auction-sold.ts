@@ -65,7 +65,7 @@ async function processAuctionSoldJob(_job: Job): Promise<void> {
   if (auctions.length > 0) {
     const rows = auctions.map(toSaleRow);
     try {
-      await postgrestInsert('auction_sales', rows);
+      await postgrestInsert('auction_sales', rows, 'auction_id');
     } catch (err) {
       log.error({ err }, 'Failed to insert auction sales into PostgREST');
     }

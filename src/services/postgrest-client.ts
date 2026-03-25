@@ -55,8 +55,9 @@ export async function postgrestSelect<T>(options: PostgrestQueryOptions): Promis
   return postgrestFetch<T[]>(path);
 }
 
-export async function postgrestInsert<T>(table: string, rows: T | T[]): Promise<void> {
-  await postgrestFetch(`/${table}`, {
+export async function postgrestInsert<T>(table: string, rows: T | T[], onConflict?: string): Promise<void> {
+  const path = onConflict ? `/${table}?on_conflict=${onConflict}` : `/${table}`;
+  await postgrestFetch(path, {
     method: 'POST',
     body: JSON.stringify(rows),
     headers: {
