@@ -12,6 +12,7 @@ const log = createLogger('hypixel-client');
 interface HypixelRequestOptions {
   endpoint: string;
   params?: Record<string, string>;
+  logLevel?: 'debug' | 'trace';
 }
 
 const MAX_RETRIES = 3;
@@ -73,7 +74,8 @@ async function fetchHypixel<T>(options: HypixelRequestOptions): Promise<T> {
     }
 
     const data = await response.json() as T;
-    log.debug({ endpoint: options.endpoint, duration_ms: Date.now() - startTime }, 'Hypixel API request completed');
+    const level = options.logLevel ?? 'debug';
+    log[level]({ endpoint: options.endpoint, params: options.params, duration_ms: Date.now() - startTime }, 'Hypixel API request completed');
     return data;
   }
 
@@ -108,6 +110,7 @@ export async function fetchAuctionsPage(page: number): Promise<HypixelAuctionsPa
   return fetchHypixel<HypixelAuctionsPageResponse>({
     endpoint: '/v2/skyblock/auctions',
     params: { page: String(page) },
+    logLevel: 'trace',
   });
 }
 

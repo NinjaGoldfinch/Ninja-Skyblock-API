@@ -83,7 +83,7 @@ export async function cacheSetBulk<T>(tier: CacheTier, resource: string, entries
   }
 
   await pipeline.exec();
-  log.debug({ tier, resource, count: entries.length }, 'Bulk cache set');
+  log.trace({ tier, resource, count: entries.length }, 'Bulk cache set');
 }
 
 export async function cacheDelete(tier: CacheTier, resource: string, id: string): Promise<void> {
