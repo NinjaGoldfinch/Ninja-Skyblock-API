@@ -141,6 +141,7 @@ async function processAuctionJob(_job: Job): Promise<void> {
     }),
   );
   const priorityPages = await Promise.all(priorityPromises);
+  const priorityDuration = Date.now() - fetchStart;
   for (const pageData of priorityPages) {
     if (pageData?.success) {
       processPage(pageData.auctions);
@@ -248,6 +249,7 @@ async function processAuctionJob(_job: Job): Promise<void> {
     total_auctions: firstPage.totalAuctions,
     pages: firstPage.totalPages,
     priority_pages: priorityCount + 1, // +1 for page 0
+    priority_fetch_ms: priorityDuration,
     pages_succeeded: pagesSucceeded,
     fetch_duration_ms: fetchDuration,
     bin_auctions: allBinAuctions.length,
