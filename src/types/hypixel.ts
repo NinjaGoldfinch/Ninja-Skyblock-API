@@ -103,3 +103,29 @@ export interface HypixelBazaarResponse {
   lastUpdated: number;
   products: Record<string, HypixelBazaarProduct>;
 }
+
+export interface HypixelAuction {
+  uuid: string;
+  auctioneer: string;
+  profile_id: string;
+  start: number;
+  end: number;
+  item_name: string;
+  item_lore: string;
+  extra: string;
+  category: string;
+  tier: string;
+  starting_bid: number;
+  highest_bid_amount: number;
+  bin: boolean;
+  item_bytes: string;
+}
+
+export interface HypixelAuctionsPageResponse {
+  success: boolean;
+  page: number;
+  totalPages: number;
+  totalAuctions: number;
+  lastUpdated: number;
+  auctions: HypixelAuction[];
+}

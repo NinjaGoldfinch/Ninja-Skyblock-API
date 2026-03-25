@@ -7,6 +7,8 @@ import { profileRoute } from './routes/v1/skyblock/profile.js';
 import { bazaarRoute } from './routes/v1/skyblock/bazaar.js';
 import { authPlugin } from './plugins/auth.js';
 import { startBazaarTracker } from './workers/bazaar-tracker.js';
+import { startAuctionScanner } from './workers/auction-scanner.js';
+import { startProfileTracker } from './workers/profile-tracker.js';
 import { closeQueues } from './utils/queue.js';
 import { sseRoute } from './routes/v1/events/stream.js';
 import { adminKeysRoute } from './routes/v1/admin/keys.js';
@@ -105,7 +107,9 @@ const start = async () => {
 
     // Start background workers
     startBazaarTracker();
-    logger.info('Bazaar tracker started');
+    startAuctionScanner();
+    startProfileTracker();
+    logger.info('Background workers started');
 
     // Attach WebSocket server to the underlying HTTP server
     const httpServer = app.server;

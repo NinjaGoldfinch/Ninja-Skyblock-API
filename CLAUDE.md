@@ -35,6 +35,11 @@ Phase 4 Core — complete
 - [x] 2. Public rate limiting (per-key tier-based limits via auth plugin)
 - [x] 3. Discord bot (separate client project — API side ready)
 
+### Phase 2 "then"
+- [x] Auction scanner worker (paginated fetch, lowest BIN tracking, ending-soon alerts)
+- [x] Profile tracker worker (watched players, skill diff, snapshot storage)
+- [x] Postgres aggregation functions (hourly bazaar averages, skill history)
+
 ## What works
 - Step 1: `tsc --noEmit` passes, server boots with env vars set, exits cleanly on timeout
 - Step 2: env.ts parses all required/optional vars, exits on missing required vars
@@ -50,6 +55,7 @@ Phase 4 Core — complete
 - Phase 2 Step 4: Bazaar current price endpoint (from warm cache) and history endpoint (from Postgres)
 - Phase 3: Event bus publishes bazaar price changes (>5% delta). SSE streams to web clients. WebSocket supports channel subscriptions with item filters.
 - Phase 4 Steps 1-2: API keys stored as SHA-256 hashes in Postgres. Auth plugin supports HMAC, API key, and dev bypass. Rate limits are per-key (stored in api_keys table). Admin endpoint generates keys (internal auth only).
+- Phase 2 "then": Auction scanner fetches all pages, tracks lowest BINs in hot cache, publishes new-lowest-BIN and ending-soon events. Profile tracker polls watched players, diffs skill averages, stores snapshots to Postgres. Postgres functions for hourly bazaar aggregation and skill history.
 
 ## Known issues
 - Networth computation is a placeholder — needs NBT inventory decoding and bazaar/AH price lookups (Phase 2 dependency)

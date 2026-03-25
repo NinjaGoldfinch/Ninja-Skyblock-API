@@ -2,7 +2,7 @@ import { env } from '../config/env.js';
 import { HYPIXEL_BASE_URL } from '../config/constants.js';
 import { errors } from '../utils/errors.js';
 import { createLogger } from '../utils/logger.js';
-import type { HypixelProfilesResponse, HypixelProfileResponse, HypixelBazaarResponse } from '../types/hypixel.js';
+import type { HypixelProfilesResponse, HypixelProfileResponse, HypixelBazaarResponse, HypixelAuctionsPageResponse } from '../types/hypixel.js';
 
 const log = createLogger('hypixel-client');
 
@@ -98,6 +98,13 @@ export async function fetchPlayerProfiles(playerUuid: string): Promise<HypixelPr
 export async function fetchBazaar(): Promise<HypixelBazaarResponse> {
   return fetchHypixel<HypixelBazaarResponse>({
     endpoint: '/v2/skyblock/bazaar',
+  });
+}
+
+export async function fetchAuctionsPage(page: number): Promise<HypixelAuctionsPageResponse> {
+  return fetchHypixel<HypixelAuctionsPageResponse>({
+    endpoint: '/v2/skyblock/auctions',
+    params: { page: String(page) },
   });
 }
 
