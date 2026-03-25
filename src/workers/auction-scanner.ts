@@ -28,7 +28,6 @@ export interface TrackedAuction {
   tier: string;
   category: string;
   bin: boolean;
-  item_lore: string;
   extra: string;
 }
 
@@ -45,7 +44,6 @@ export interface AuctionItemData {
   ends_at: number;
   tier: string;
   category: string;
-  item_lore: string;
 }
 
 export interface LowestBinData {
@@ -72,7 +70,6 @@ interface AuctionHistoryRow {
   started_at: string;
   ended_at: string;
   item_bytes: string | null;
-  item_lore: string | null;
 }
 
 // --- In-memory state ---
@@ -140,7 +137,6 @@ function processNewAuction(auction: HypixelAuction, nameToId: Record<string, str
     tier: auction.tier,
     category: auction.category,
     bin: auction.bin,
-    item_lore: auction.item_lore,
     extra: auction.extra,
   };
 }
@@ -168,7 +164,6 @@ function buildLowestBins(): Map<string, LowestBinData> {
     const listings: AuctionItemData[] = auctions.slice(0, 20).map((a) => ({
       item_name: a.item_name, price: a.price, auction_id: a.auction_id,
       seller_uuid: a.seller_uuid, ends_at: a.ends_at, tier: a.tier, category: a.category,
-      item_lore: a.item_lore,
     }));
     lowestBins.set(baseItem, {
       skyblock_id: auctions[0]!.skyblock_id, base_item: baseItem,
@@ -195,7 +190,6 @@ function toHistoryRow(auction: TrackedAuction, outcome: 'sold' | 'expired' | 'ca
     started_at: new Date(auction.starts_at).toISOString(),
     ended_at: new Date().toISOString(),
     item_bytes: null, // Stored separately in auction_item_data table
-    item_lore: auction.item_lore ?? null,
   };
 }
 
