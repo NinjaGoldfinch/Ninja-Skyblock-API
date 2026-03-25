@@ -1,7 +1,7 @@
 import type { Job } from 'bullmq';
 import { getQueue, createWorker } from '../utils/queue.js';
 import { fetchConditional } from '../services/hypixel-client.js';
-import { cacheSetBulk } from '../services/cache-manager.js';
+import { cacheSet, cacheSetBulk } from '../services/cache-manager.js';
 import { postgrestInsert } from '../services/postgrest-client.js';
 import { publish } from '../services/event-bus.js';
 import { env } from '../config/env.js';
@@ -140,6 +140,9 @@ async function processBazaarJob(_job: Job): Promise<void> {
   const lastUpdated = response.lastUpdated;
   await cacheSetBulk('warm', 'bazaar', cacheEntries, lastUpdated);
   await cacheSetBulk('warm', 'bazaar-raw', rawCacheEntries, lastUpdated);
+
+  // Store full raw response as single key for bulk reads
+  await cacheSet('warm', 'bazaar-all', 'latest', response.products, lastUpdated);
 
   // Bulk insert raw snapshots into Postgres
   if (snapshotRows.length > 0) {
