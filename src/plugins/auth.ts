@@ -60,6 +60,12 @@ export const authPlugin = fp(async (app: FastifyInstance) => {
       return;
     }
 
+    // Skip auth in dev when DEV_AUTH_BYPASS is enabled
+    if (env.DEV_AUTH_BYPASS) {
+      request.clientId = 'dev-bypass';
+      return;
+    }
+
     verifyHmacSignature(request);
     request.clientId = 'hmac-client';
   });

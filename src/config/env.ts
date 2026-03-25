@@ -24,6 +24,7 @@ export const env = {
 
   // Auth
   HMAC_SECRET:           requireEnv('HMAC_SECRET'),
+  DEV_AUTH_BYPASS:       process.env['DEV_AUTH_BYPASS'] === 'true',
 
   // Rate limits (overridable, sensible defaults)
   CLIENT_RATE_LIMIT:     parseInt(process.env['CLIENT_RATE_LIMIT'] ?? '60'),
