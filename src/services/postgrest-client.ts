@@ -1,5 +1,8 @@
 import { env } from '../config/env.js';
 import { errors } from '../utils/errors.js';
+import { createLogger } from '../utils/logger.js';
+
+const log = createLogger('postgrest-client');
 
 interface PostgrestQueryOptions {
   table: string;
@@ -11,6 +14,7 @@ interface PostgrestQueryOptions {
 
 async function postgrestFetch<T>(path: string, init?: RequestInit): Promise<T> {
   const url = `${env.POSTGREST_URL}${path}`;
+  const startTime = Date.now();
   const response = await fetch(url, {
     ...init,
     headers: {
@@ -20,11 +24,15 @@ async function postgrestFetch<T>(path: string, init?: RequestInit): Promise<T> {
     },
   });
 
+  const durationMs = Date.now() - startTime;
+
   if (!response.ok) {
     const body = await response.text();
+    log.error({ path, status: response.status, duration_ms: durationMs }, 'PostgREST error');
     throw errors.internal(new Error(`PostgREST error ${response.status}: ${body}`));
   }
 
+  log.debug({ path, method: init?.method ?? 'GET', duration_ms: durationMs }, 'PostgREST request completed');
   return response.json() as Promise<T>;
 }
 

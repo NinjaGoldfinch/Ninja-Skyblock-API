@@ -6,7 +6,9 @@ import { postgrestInsert } from '../services/postgrest-client.js';
 import { publish } from '../services/event-bus.js';
 import { env } from '../config/env.js';
 import type { HypixelBazaarProduct } from '../types/hypixel.js';
+import { createLogger } from '../utils/logger.js';
 
+const log = createLogger('bazaar-tracker');
 const QUEUE_NAME = 'bazaar-tracker';
 
 interface RawSnapshotRow {
@@ -60,8 +62,12 @@ function transformProduct(productId: string, product: HypixelBazaarProduct): Baz
 }
 
 async function processBazaarJob(_job: Job): Promise<void> {
+  const startTime = Date.now();
   const response = await fetchBazaar();
-  if (!response.success) return;
+  if (!response.success) {
+    log.warn('Bazaar fetch returned success=false');
+    return;
+  }
 
   const products = Object.entries(response.products);
   const snapshotRows: RawSnapshotRow[] = [];
@@ -104,10 +110,12 @@ async function processBazaarJob(_job: Job): Promise<void> {
   if (snapshotRows.length > 0) {
     try {
       await postgrestInsert('bazaar_snapshots', snapshotRows);
-    } catch {
-      // PostgREST may not be available yet — don't crash the worker
+    } catch (err) {
+      log.error({ err }, 'Failed to insert bazaar snapshots into PostgREST');
     }
   }
+
+  log.info({ products_updated: products.length, duration_ms: Date.now() - startTime }, 'Bazaar poll complete');
 }
 
 export function startBazaarTracker(): void {

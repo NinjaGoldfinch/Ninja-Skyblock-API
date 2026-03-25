@@ -1,7 +1,10 @@
 import { env } from '../config/env.js';
 import { HYPIXEL_BASE_URL } from '../config/constants.js';
 import { errors } from '../utils/errors.js';
+import { createLogger } from '../utils/logger.js';
 import type { HypixelProfilesResponse, HypixelProfileResponse, HypixelBazaarResponse } from '../types/hypixel.js';
+
+const log = createLogger('hypixel-client');
 
 interface HypixelRequestOptions {
   endpoint: string;
@@ -24,6 +27,7 @@ async function fetchHypixel<T>(options: HypixelRequestOptions): Promise<T> {
   }
 
   let lastError: unknown;
+  const startTime = Date.now();
 
   for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
     const response = await fetch(url.toString(), {
@@ -35,6 +39,7 @@ async function fetchHypixel<T>(options: HypixelRequestOptions): Promise<T> {
 
     // 403 — invalid key, stop immediately
     if (response.status === 403) {
+      log.error({ endpoint: options.endpoint, status: 403 }, 'Hypixel API forbidden — invalid key');
       throw errors.hypixelError(new Error('Hypixel API returned 403 Forbidden'));
     }
 
@@ -43,6 +48,7 @@ async function fetchHypixel<T>(options: HypixelRequestOptions): Promise<T> {
       lastError = new Error('Hypixel API rate limited (429)');
       const retryAfter = response.headers.get('retry-after');
       const delayMs = retryAfter ? parseInt(retryAfter) * 1000 : RETRY_DELAY_MS * (attempt + 1);
+      log.warn({ endpoint: options.endpoint, attempt, delay_ms: delayMs }, 'Hypixel rate limited, backing off');
       await sleep(delayMs);
       continue;
     }
@@ -50,17 +56,21 @@ async function fetchHypixel<T>(options: HypixelRequestOptions): Promise<T> {
     // 503 — Hypixel down, retry with different timing
     if (response.status === 503) {
       lastError = new Error('Hypixel API unavailable (503)');
-      await sleep(RETRY_DELAY_MS * (attempt + 1) * 2);
+      const delayMs = RETRY_DELAY_MS * (attempt + 1) * 2;
+      log.warn({ endpoint: options.endpoint, attempt, delay_ms: delayMs }, 'Hypixel unavailable, retrying');
+      await sleep(delayMs);
       continue;
     }
 
     // Other non-OK responses
     if (!response.ok) {
       const body = await response.text();
+      log.error({ endpoint: options.endpoint, status: response.status }, 'Hypixel API error');
       throw errors.hypixelError(new Error(`Hypixel API returned ${response.status}: ${body}`));
     }
 
     const data = await response.json() as T;
+    log.debug({ endpoint: options.endpoint, duration_ms: Date.now() - startTime }, 'Hypixel API request completed');
     return data;
   }
 

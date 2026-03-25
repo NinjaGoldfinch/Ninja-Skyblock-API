@@ -1,6 +1,9 @@
 import { getRedis } from '../utils/redis.js';
 import { env } from '../config/env.js';
 import { CACHE_PREFIX_HOT, CACHE_PREFIX_WARM, STALE_MULTIPLIER } from '../config/constants.js';
+import { createLogger } from '../utils/logger.js';
+
+const log = createLogger('cache-manager');
 
 export type CacheTier = 'hot' | 'warm';
 
@@ -34,6 +37,7 @@ export async function cacheGet<T>(tier: CacheTier, resource: string, id: string)
   const raw = await redis.get(key);
 
   if (!raw) {
+    log.debug({ key, hit: false }, 'Cache miss');
     return null;
   }
 
@@ -42,6 +46,7 @@ export async function cacheGet<T>(tier: CacheTier, resource: string, id: string)
   const ttl = getTtl(tier);
   const stale = ageSeconds > ttl;
 
+  log.debug({ key, hit: true, age_seconds: ageSeconds, stale }, 'Cache hit');
   return {
     data: entry.data,
     cached: true,

@@ -2,6 +2,7 @@ import Fastify from 'fastify';
 import { env } from './config/env.js';
 import { AppError } from './utils/errors.js';
 import { closeRedis } from './utils/redis.js';
+import { logger } from './utils/logger.js';
 import { profileRoute } from './routes/v1/skyblock/profile.js';
 import { bazaarRoute } from './routes/v1/skyblock/bazaar.js';
 import { authPlugin } from './plugins/auth.js';
@@ -12,7 +13,7 @@ import { adminKeysRoute } from './routes/v1/admin/keys.js';
 import { setupWebSocket } from './routes/v1/events/subscribe.js';
 import { closeEventBus } from './services/event-bus.js';
 
-const app = Fastify();
+const app = Fastify({ logger });
 
 // Global error handler
 app.setErrorHandler((error, _request, reply) => {
@@ -35,6 +36,7 @@ app.setErrorHandler((error, _request, reply) => {
   }
 
   // Unexpected errors
+  logger.error({ err: error }, 'Unhandled error');
   return reply.status(500).send({
     success: false,
     error: { code: 'INTERNAL_ERROR', message: 'An unexpected error occurred.', status: 500 },
@@ -59,16 +61,18 @@ app.get('/v1/health', async () => {
 const start = async () => {
   try {
     await app.listen({ port: env.PORT, host: '0.0.0.0' });
+    logger.info({ port: env.PORT }, 'Server started');
 
     // Start background workers
     startBazaarTracker();
+    logger.info('Bazaar tracker started');
 
     // Attach WebSocket server to the underlying HTTP server
     const httpServer = app.server;
     await setupWebSocket(httpServer);
+    logger.info('WebSocket server attached');
   } catch (err) {
-    process.stderr.write(`FATAL: ${err instanceof Error ? err.message : String(err)}\n`);
-    if (err instanceof Error && err.stack) process.stderr.write(`${err.stack}\n`);
+    logger.fatal({ err }, 'Failed to start server');
     await closeQueues();
     await closeEventBus();
     await closeRedis();
