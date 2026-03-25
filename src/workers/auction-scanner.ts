@@ -125,14 +125,18 @@ async function processAuctionJob(_job: Job): Promise<void> {
   // Process page 0 (already fetched)
   processPage(firstPage.auctions);
 
-  // Fetch remaining pages (page 0 already parsed, start from 1)
-  for (let page = 1; page < firstPage.totalPages; page++) {
-    try {
-      const pageData = await fetchAuctionsPage(page);
-      if (!pageData.success) continue;
+  // Fetch all remaining pages in parallel
+  const pagePromises = Array.from(
+    { length: firstPage.totalPages - 1 },
+    (_, i) => fetchAuctionsPage(i + 1).catch((err) => {
+      log.warn({ page: i + 1, err }, 'Failed to fetch auction page');
+      return null;
+    }),
+  );
+  const pages = await Promise.all(pagePromises);
+  for (const pageData of pages) {
+    if (pageData?.success) {
       processPage(pageData.auctions);
-    } catch (err) {
-      log.warn({ page, err }, 'Failed to fetch auction page');
     }
   }
 
