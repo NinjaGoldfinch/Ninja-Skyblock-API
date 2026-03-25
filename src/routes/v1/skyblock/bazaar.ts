@@ -59,7 +59,7 @@ export async function bazaarRoute(app: FastifyInstance): Promise<void> {
           type: 'object',
           required: ['itemId'],
           properties: {
-            itemId: { type: 'string', description: 'Hypixel item ID in SCREAMING_SNAKE_CASE.' },
+            itemId: { type: 'string', minLength: 1, description: 'Hypixel item ID in SCREAMING_SNAKE_CASE.' },
           },
         },
         response: {
