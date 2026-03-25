@@ -348,4 +348,6 @@ interface AuctionHistoryRow {
   outcome: string;
   started_at: string;
   ended_at: string;
+  item_bytes: string | null;
+  item_lore: string | null;
 }
