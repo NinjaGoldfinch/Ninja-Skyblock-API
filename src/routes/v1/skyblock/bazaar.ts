@@ -134,12 +134,23 @@ export async function bazaarRoute(app: FastifyInstance): Promise<void> {
         sell_volume: row.sell_volume,
       }));
 
+      const count = datapoints.length;
+      const avg_buy_price = count > 0
+        ? Math.round((datapoints.reduce((sum, d) => sum + d.buy_price, 0) / count) * 100) / 100
+        : null;
+      const avg_sell_price = count > 0
+        ? Math.round((datapoints.reduce((sum, d) => sum + d.sell_price, 0) / count) * 100) / 100
+        : null;
+
       return {
         success: true,
         data: {
           item_id: itemId,
           range,
           resolution,
+          count,
+          avg_buy_price,
+          avg_sell_price,
           datapoints,
         },
         meta: { cached: false, cache_age_seconds: null, timestamp: Date.now() },
