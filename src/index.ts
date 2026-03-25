@@ -8,6 +8,7 @@ import { authPlugin } from './plugins/auth.js';
 import { startBazaarTracker } from './workers/bazaar-tracker.js';
 import { closeQueues } from './utils/queue.js';
 import { sseRoute } from './routes/v1/events/stream.js';
+import { adminKeysRoute } from './routes/v1/admin/keys.js';
 import { setupWebSocket } from './routes/v1/events/subscribe.js';
 import { closeEventBus } from './services/event-bus.js';
 
@@ -48,6 +49,7 @@ app.register(authPlugin);
 app.register(profileRoute);
 app.register(bazaarRoute);
 app.register(sseRoute);
+app.register(adminKeysRoute);
 
 // Health check
 app.get('/v1/health', async () => {

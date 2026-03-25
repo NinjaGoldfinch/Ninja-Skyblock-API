@@ -68,7 +68,7 @@ export async function bazaarRoute(app: FastifyInstance): Promise<void> {
     },
     async (request: FastifyRequest<{ Params: BazaarParams }>) => {
       const { itemId } = request.params;
-      await enforceClientRateLimit(request.clientId);
+      await enforceClientRateLimit(request.clientId, request.clientRateLimit);
 
       const cached = await cacheGet<BazaarProductData>('warm', 'bazaar', itemId);
       if (cached) {
@@ -106,7 +106,7 @@ export async function bazaarRoute(app: FastifyInstance): Promise<void> {
     async (request: FastifyRequest<{ Params: BazaarParams; Querystring: HistoryQuery }>) => {
       const { itemId } = request.params;
       const range = request.query.range ?? '24h';
-      await enforceClientRateLimit(request.clientId);
+      await enforceClientRateLimit(request.clientId, request.clientRateLimit);
 
       const interval = RANGE_TO_INTERVAL[range] ?? '24 hours';
       const resolution = RANGE_TO_RESOLUTION[range] ?? '5m';

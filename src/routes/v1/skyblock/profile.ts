@@ -112,7 +112,7 @@ export async function profileRoute(app: FastifyInstance): Promise<void> {
     async (request: FastifyRequest<{ Params: ProfileParams }>, reply) => {
       const profileUuid = request.params.profileUuid.replaceAll('-', '');
 
-      await enforceClientRateLimit(request.clientId);
+      await enforceClientRateLimit(request.clientId, request.clientRateLimit);
 
       // Cache check
       const cached = await cacheGet<SkyBlockProfile>('hot', 'profile', profileUuid);

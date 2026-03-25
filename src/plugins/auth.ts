@@ -3,12 +3,15 @@ import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import { env } from '../config/env.js';
 import { errors } from '../utils/errors.js';
+import { validateApiKey } from '../services/api-key-manager.js';
 
 const MAX_TIMESTAMP_DRIFT_MS = 300_000; // 5 minutes
 
 declare module 'fastify' {
   interface FastifyRequest {
     clientId: string;
+    clientTier: string;
+    clientRateLimit: number;
   }
 }
 
@@ -52,21 +55,49 @@ function verifyHmacSignature(request: FastifyRequest): void {
 
 export const authPlugin = fp(async (app: FastifyInstance) => {
   app.decorateRequest('clientId', '');
+  app.decorateRequest('clientTier', 'public');
+  app.decorateRequest('clientRateLimit', env.PUBLIC_RATE_LIMIT);
 
   app.addHook('onRequest', async (request) => {
-    // Skip auth for health check
-    if (request.url === '/v1/health') {
+    // Skip auth for health check and SSE/WS endpoints
+    if (request.url === '/v1/health' || request.url.startsWith('/v1/events/')) {
       request.clientId = 'anonymous';
+      request.clientTier = 'anonymous';
+      request.clientRateLimit = env.CLIENT_RATE_LIMIT;
       return;
     }
 
     // Skip auth in dev when DEV_AUTH_BYPASS is enabled
     if (env.DEV_AUTH_BYPASS) {
       request.clientId = 'dev-bypass';
+      request.clientTier = 'internal';
+      request.clientRateLimit = env.CLIENT_RATE_LIMIT;
       return;
     }
 
-    verifyHmacSignature(request);
-    request.clientId = 'hmac-client';
+    // Try HMAC auth first (Fabric mod)
+    const signature = request.headers['x-signature'] as string | undefined;
+    if (signature) {
+      verifyHmacSignature(request);
+      request.clientId = 'hmac-client';
+      request.clientTier = 'internal';
+      request.clientRateLimit = env.CLIENT_RATE_LIMIT;
+      return;
+    }
+
+    // Try API key auth (public consumers, Discord bot)
+    const apiKey = request.headers['x-api-key'] as string | undefined;
+    if (apiKey) {
+      const keyInfo = await validateApiKey(apiKey);
+      if (!keyInfo) {
+        throw errors.unauthorized('Invalid or inactive API key.');
+      }
+      request.clientId = `apikey:${keyInfo.owner}`;
+      request.clientTier = keyInfo.tier;
+      request.clientRateLimit = keyInfo.rate_limit;
+      return;
+    }
+
+    throw errors.unauthorized('Missing authentication. Provide X-Signature (HMAC) or X-API-Key header.');
   });
 });

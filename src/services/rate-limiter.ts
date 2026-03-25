@@ -32,9 +32,9 @@ async function checkRateLimit(key: string, limit: number): Promise<RateLimitResu
   };
 }
 
-export async function checkClientRateLimit(clientId: string): Promise<RateLimitResult> {
+export async function checkClientRateLimit(clientId: string, limit?: number): Promise<RateLimitResult> {
   const key = `${RATE_PREFIX_CLIENT}:${clientId}`;
-  return checkRateLimit(key, env.CLIENT_RATE_LIMIT);
+  return checkRateLimit(key, limit ?? env.CLIENT_RATE_LIMIT);
 }
 
 export async function checkHypixelRateLimit(apiKey: string): Promise<RateLimitResult> {
@@ -43,8 +43,8 @@ export async function checkHypixelRateLimit(apiKey: string): Promise<RateLimitRe
   return checkRateLimit(key, env.HYPIXEL_RATE_LIMIT);
 }
 
-export async function enforceClientRateLimit(clientId: string): Promise<void> {
-  const result = await checkClientRateLimit(clientId);
+export async function enforceClientRateLimit(clientId: string, limit?: number): Promise<void> {
+  const result = await checkClientRateLimit(clientId, limit);
   if (!result.allowed) {
     throw errors.rateLimited();
   }

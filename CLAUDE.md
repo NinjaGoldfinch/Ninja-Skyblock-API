@@ -5,7 +5,7 @@ ninja-skyblock-api — Backend API proxying Hypixel API for SkyBlock endpoints.
 See ARCHITECTURE.md for full specification.
 
 ## Current phase
-Phase 3 Core — complete
+Phase 4 Core — step 3 of 3
 
 ## Completed steps
 
@@ -30,6 +30,11 @@ Phase 3 Core — complete
 - [x] 2. SSE endpoint (GET /v1/events/bazaar/stream)
 - [x] 3. WebSocket server (WS /v1/events/subscribe)
 
+### Phase 4 Core
+- [x] 1. API key management (generation, validation, per-key rate limits)
+- [x] 2. Public rate limiting (per-key tier-based limits via auth plugin)
+- [ ] 3. Discord bot
+
 ## What works
 - Step 1: `tsc --noEmit` passes, server boots with env vars set, exits cleanly on timeout
 - Step 2: env.ts parses all required/optional vars, exits on missing required vars
@@ -44,6 +49,7 @@ Phase 3 Core — complete
 - Phase 2 Step 3: Initial migration creates bazaar_snapshots, auction_sales, player_profiles tables
 - Phase 2 Step 4: Bazaar current price endpoint (from warm cache) and history endpoint (from Postgres)
 - Phase 3: Event bus publishes bazaar price changes (>5% delta). SSE streams to web clients. WebSocket supports channel subscriptions with item filters.
+- Phase 4 Steps 1-2: API keys stored as SHA-256 hashes in Postgres. Auth plugin supports HMAC, API key, and dev bypass. Rate limits are per-key (stored in api_keys table). Admin endpoint generates keys (internal auth only).
 
 ## Known issues
 - Networth computation is a placeholder — needs NBT inventory decoding and bazaar/AH price lookups (Phase 2 dependency)
@@ -56,4 +62,4 @@ Phase 3 Core — complete
 - Profile route uses profile UUID (not player UUID). Calls Hypixel /v2/skyblock/profile?profile=UUID. Phase 2 will add separate endpoints for player-based lookups, active profile, etc.
 
 ## Next step
-Phase 3 Core complete. Next: Phase 4 (API key management, public rate limiting, Discord bot) or Phase 2/3 "then" items.
+Phase 4 Step 3: Discord bot — connects to WebSocket, sends alerts to channels.
