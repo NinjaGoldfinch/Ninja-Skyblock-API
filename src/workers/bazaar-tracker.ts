@@ -55,17 +55,18 @@ async function processBazaarJob(_job: Job): Promise<void> {
   const products = Object.entries(response.products);
   const snapshotRows: BazaarSnapshotRow[] = [];
 
-  const PRICE_CHANGE_THRESHOLD = 0.05; // 5%
-
   for (const [productId, product] of products) {
     const data = transformProduct(productId, product);
     snapshotRows.push(data);
 
     // Check previous price for alert publishing
     const previous = await cacheGet<BazaarProductData>('warm', 'bazaar', productId);
-    if (previous && previous.data.buy_price > 0) {
-      const changePct = Math.abs(data.buy_price - previous.data.buy_price) / previous.data.buy_price;
-      if (changePct >= PRICE_CHANGE_THRESHOLD) {
+    if (previous) {
+      const absDiff = Math.abs(data.buy_price - previous.data.buy_price);
+      if (absDiff >= env.BAZAAR_ALERT_THRESHOLD) {
+        const changePct = previous.data.buy_price > 0
+          ? Math.round((absDiff / previous.data.buy_price) * 10000) / 100
+          : 0;
         await publish('bazaar:alerts', {
           type: 'bazaar:price_change',
           item_id: productId,
@@ -73,7 +74,7 @@ async function processBazaarJob(_job: Job): Promise<void> {
           new_buy_price: data.buy_price,
           old_sell_price: previous.data.sell_price,
           new_sell_price: data.sell_price,
-          change_pct: Math.round(changePct * 10000) / 100,
+          change_pct: changePct,
           timestamp: Date.now(),
         });
       }

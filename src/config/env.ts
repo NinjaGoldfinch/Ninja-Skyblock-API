@@ -37,6 +37,9 @@ export const env = {
   HOT_CACHE_TTL:         parseInt(process.env['HOT_CACHE_TTL'] ?? '60'),
   WARM_CACHE_TTL:        parseInt(process.env['WARM_CACHE_TTL'] ?? '300'),
 
+  // Bazaar alert threshold (absolute coin difference, 0 = any change)
+  BAZAAR_ALERT_THRESHOLD: parseFloat(process.env['BAZAAR_ALERT_THRESHOLD'] ?? '0.1'),
+
   // Worker intervals (milliseconds)
   BAZAAR_POLL_INTERVAL:  parseInt(process.env['BAZAAR_POLL_INTERVAL'] ?? '60000'),
   AUCTION_POLL_INTERVAL: parseInt(process.env['AUCTION_POLL_INTERVAL'] ?? '45000'),

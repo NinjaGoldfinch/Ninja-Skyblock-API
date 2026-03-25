@@ -24,6 +24,7 @@ services:
       HYPIXEL_RATE_LIMIT: 120
       HOT_CACHE_TTL: 60
       WARM_CACHE_TTL: 300
+      BAZAAR_ALERT_THRESHOLD: ${BAZAAR_ALERT_THRESHOLD:-0.1}
 
   postgrest:
     image: postgrest/postgrest
