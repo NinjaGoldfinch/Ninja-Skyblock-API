@@ -1,7 +1,7 @@
 import type { Job } from 'bullmq';
 import { getQueue, createWorker } from '../utils/queue.js';
 import { fetchBazaar } from '../services/hypixel-client.js';
-import { cacheGet, cacheSet } from '../services/cache-manager.js';
+import { cacheSetBulk } from '../services/cache-manager.js';
 import { postgrestInsert } from '../services/postgrest-client.js';
 import { publish } from '../services/event-bus.js';
 import { env } from '../config/env.js';
@@ -10,6 +10,9 @@ import { createLogger } from '../utils/logger.js';
 
 const log = createLogger('bazaar-tracker');
 const QUEUE_NAME = 'bazaar-tracker';
+
+// In-memory previous snapshot for price comparison (avoids 3700 Redis reads per poll)
+let previousSnapshot = new Map<string, BazaarProductData>();
 
 interface RawSnapshotRow {
   item_id: string;
@@ -71,9 +74,14 @@ async function processBazaarJob(_job: Job): Promise<void> {
 
   const products = Object.entries(response.products);
   const snapshotRows: RawSnapshotRow[] = [];
+  const cacheEntries: Array<{ id: string; data: BazaarProductData }> = [];
+  const newSnapshot = new Map<string, BazaarProductData>();
+  let alertsPublished = 0;
 
   for (const [productId, product] of products) {
     const data = transformProduct(productId, product);
+    newSnapshot.set(productId, data);
+    cacheEntries.push({ id: productId, data });
 
     // Store raw Hypixel data in Postgres
     snapshotRows.push({
@@ -81,30 +89,34 @@ async function processBazaarJob(_job: Job): Promise<void> {
       raw_data: JSON.stringify(product),
     });
 
-    // Check previous price for alert publishing
-    const previous = await cacheGet<BazaarProductData>('warm', 'bazaar', productId);
+    // Compare against in-memory previous snapshot for alerts
+    const previous = previousSnapshot.get(productId);
     if (previous) {
-      const absDiff = Math.abs(data.instant_buy_price - previous.data.instant_buy_price);
+      const absDiff = Math.abs(data.instant_buy_price - previous.instant_buy_price);
       if (absDiff >= env.BAZAAR_ALERT_THRESHOLD) {
-        const changePct = previous.data.instant_buy_price > 0
-          ? Math.round((absDiff / previous.data.instant_buy_price) * 10000) / 100
+        const changePct = previous.instant_buy_price > 0
+          ? Math.round((absDiff / previous.instant_buy_price) * 10000) / 100
           : 0;
         await publish('bazaar:alerts', {
           type: 'bazaar:price_change',
           item_id: productId,
-          old_buy_price: previous.data.instant_buy_price,
+          old_buy_price: previous.instant_buy_price,
           new_buy_price: data.instant_buy_price,
-          old_sell_price: previous.data.instant_sell_price,
+          old_sell_price: previous.instant_sell_price,
           new_sell_price: data.instant_sell_price,
           change_pct: changePct,
           timestamp: Date.now(),
         });
+        alertsPublished++;
       }
     }
-
-    // Update warm cache with processed data
-    await cacheSet('warm', 'bazaar', productId, data);
   }
+
+  // Update in-memory snapshot for next poll
+  previousSnapshot = newSnapshot;
+
+  // Bulk write all products to warm cache in one Redis pipeline
+  await cacheSetBulk('warm', 'bazaar', cacheEntries);
 
   // Bulk insert raw snapshots into Postgres
   if (snapshotRows.length > 0) {
@@ -115,7 +127,11 @@ async function processBazaarJob(_job: Job): Promise<void> {
     }
   }
 
-  log.info({ products_updated: products.length, duration_ms: Date.now() - startTime }, 'Bazaar poll complete');
+  log.info({
+    products_updated: products.length,
+    alerts_published: alertsPublished,
+    duration_ms: Date.now() - startTime,
+  }, 'Bazaar poll complete');
 }
 
 export function startBazaarTracker(): void {
