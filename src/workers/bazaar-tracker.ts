@@ -121,9 +121,10 @@ async function processBazaarJob(_job: Job): Promise<void> {
   // Update in-memory snapshot for next poll
   previousSnapshot = newSnapshot;
 
-  // Bulk write processed + raw data to warm cache
-  await cacheSetBulk('warm', 'bazaar', cacheEntries);
-  await cacheSetBulk('warm', 'bazaar-raw', rawCacheEntries);
+  // Bulk write processed + raw data to warm cache using Hypixel's lastUpdated
+  const lastUpdated = response.lastUpdated;
+  await cacheSetBulk('warm', 'bazaar', cacheEntries, lastUpdated);
+  await cacheSetBulk('warm', 'bazaar-raw', rawCacheEntries, lastUpdated);
 
   // Bulk insert raw snapshots into Postgres
   if (snapshotRows.length > 0) {
@@ -151,4 +152,7 @@ export function startBazaarTracker(): void {
   );
 
   createWorker(QUEUE_NAME, processBazaarJob);
+
+  // Fetch immediately on startup
+  queue.add('bazaar-poll-immediate', {}, { priority: 1 });
 }

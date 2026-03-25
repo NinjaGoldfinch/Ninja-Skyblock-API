@@ -55,32 +55,30 @@ export async function cacheGet<T>(tier: CacheTier, resource: string, id: string)
   };
 }
 
-export async function cacheSet<T>(tier: CacheTier, resource: string, id: string, data: T): Promise<void> {
+export async function cacheSet<T>(tier: CacheTier, resource: string, id: string, data: T, dataTimestamp?: number): Promise<void> {
   const redis = getRedis();
   const key = buildKey(tier, resource, id);
   const ttl = getTtl(tier);
-
-  // Store with extended TTL so stale-while-revalidate can serve stale data
   const extendedTtl = ttl * STALE_MULTIPLIER;
 
   const entry: CacheEntry<T> = {
     data,
-    cached_at: Date.now(),
+    cached_at: dataTimestamp ?? Date.now(),
   };
 
   await redis.set(key, JSON.stringify(entry), 'EX', extendedTtl);
 }
 
-export async function cacheSetBulk<T>(tier: CacheTier, resource: string, entries: Array<{ id: string; data: T }>): Promise<void> {
+export async function cacheSetBulk<T>(tier: CacheTier, resource: string, entries: Array<{ id: string; data: T }>, dataTimestamp?: number): Promise<void> {
   const redis = getRedis();
   const ttl = getTtl(tier);
   const extendedTtl = ttl * STALE_MULTIPLIER;
-  const now = Date.now();
+  const ts = dataTimestamp ?? Date.now();
   const pipeline = redis.pipeline();
 
   for (const entry of entries) {
     const key = buildKey(tier, resource, entry.id);
-    const cacheEntry: CacheEntry<T> = { data: entry.data, cached_at: now };
+    const cacheEntry: CacheEntry<T> = { data: entry.data, cached_at: ts };
     pipeline.set(key, JSON.stringify(cacheEntry), 'EX', extendedTtl);
   }
 

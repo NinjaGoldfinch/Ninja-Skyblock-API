@@ -169,4 +169,7 @@ export function startProfileTracker(): void {
   );
 
   createWorker(QUEUE_NAME, processProfileJob);
+
+  // Fetch immediately on startup
+  queue.add('profile-poll-immediate', {}, { priority: 1 });
 }

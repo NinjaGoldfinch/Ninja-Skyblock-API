@@ -190,7 +190,7 @@ async function processAuctionJob(_job: Job): Promise<void> {
     data,
   }));
   if (cacheEntries.length > 0) {
-    await cacheSetBulk('hot', 'auction-lowest', cacheEntries);
+    await cacheSetBulk('hot', 'auction-lowest', cacheEntries, firstPage.lastUpdated);
   }
 
   previousLowestBins = lowestBins;
@@ -216,4 +216,7 @@ export function startAuctionScanner(): void {
   );
 
   createWorker(QUEUE_NAME, processAuctionJob);
+
+  // Fetch immediately on startup
+  queue.add('auction-scan-immediate', {}, { priority: 1 });
 }
