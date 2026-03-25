@@ -77,7 +77,8 @@ All phases complete. Remaining: bazaar data retention (deferred), additional rou
 - Bazaar raw JSONB storage will grow fast — add a scheduled data retention job: strip order books after 24h, aggregate to hourly after 7d, delete raw after 30d
 - Auction scanner uses string stripping for base item names — fragile to new reforges/formatting. Better approach: maintain a display-name-to-item-ID lookup table from NEU repo or similar source. Fast lookup, no NBT parsing needed, just periodic updates when Hypixel adds items.
 - Further auction optimization: cache auction_id → item_id mapping in Redis so only new auctions need processing each scan cycle (most auctions persist for hours)
-- Move workers (bazaar tracker, auction scanner, profile tracker) to a separate Docker service with its own entry point so API rebuilds don't interrupt data collection
+- [RESOLVED] Workers now run as separate Docker services with independent entry points
+- Future optimization: use Unix domain sockets for same-machine worker↔API communication and direct TCP/WebSocket for cross-machine — would remove Redis as a communication dependency, leaving Redis purely for fast cache reads. Not significant until Redis becomes a bottleneck or single point of failure concern.
 - [RESOLVED] Watched players now manageable via API (GET/POST/DELETE /v1/admin/watched-players)
 - [RESOLVED] Auction lowest BIN now exposed via GET /v1/skyblock/auctions/lowest/:item
 
