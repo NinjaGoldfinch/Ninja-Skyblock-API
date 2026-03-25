@@ -2,6 +2,7 @@ import type { Job } from 'bullmq';
 import { getQueue, createWorker } from '../utils/queue.js';
 import { fetchConditional } from '../services/hypixel-client.js';
 import { cacheSet } from '../services/cache-manager.js';
+import { postgrestInsert } from '../services/postgrest-client.js';
 import { createLogger } from '../utils/logger.js';
 import type { HypixelSkillsResponse } from '../types/hypixel.js';
 
@@ -27,15 +28,27 @@ async function processJob(_job: Job): Promise<void> {
   if (!response.success) return;
 
   await cacheSet('warm', 'resources', 'skills', response, response.lastUpdated);
+
+  try {
+    await postgrestInsert('resource_snapshots', {
+      resource_type: 'skills',
+      version: response.version,
+      raw_data: response as unknown as Record<string, unknown>,
+    });
+  } catch (err) {
+    log.error({ err }, 'Failed to insert skills snapshot');
+  }
+
   log.info({ version: response.version }, 'Skills updated');
 }
 
 export function startSkillsTracker(): void {
   const queue = getQueue(QUEUE_NAME);
 
+  // Poll every 1s — conditional fetch skips when unchanged
   queue.upsertJobScheduler(
     'skills-poll',
-    { every: 60_000 },
+    { every: 1000 },
     { name: 'skills-poll' },
   );
 

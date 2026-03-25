@@ -10,6 +10,7 @@ import { playerAuctionsRoute } from './routes/v1/skyblock/player-auctions.js';
 import { auctionsEndedRoute } from './routes/v1/skyblock/auctions-ended.js';
 import { playerUuidRoute } from './routes/v1/player/uuid.js';
 import { playerUsernameRoute } from './routes/v1/player/username.js';
+import { resourcesRoute } from './routes/v1/skyblock/resources.js';
 import { v2ProfileRoute } from './routes/v2/skyblock/profile.js';
 import { v2BazaarRoute } from './routes/v2/skyblock/bazaar.js';
 import { v2AuctionsRoute } from './routes/v2/skyblock/auctions.js';
@@ -77,6 +78,7 @@ app.register(playerAuctionsRoute);
 app.register(auctionsEndedRoute);
 app.register(playerUuidRoute);
 app.register(playerUsernameRoute);
+app.register(resourcesRoute);
 
 // v2 routes — computed/processed data
 app.register(v2ProfileRoute);

@@ -2,6 +2,7 @@ import type { Job } from 'bullmq';
 import { getQueue, createWorker } from '../utils/queue.js';
 import { fetchConditional } from '../services/hypixel-client.js';
 import { cacheSet } from '../services/cache-manager.js';
+import { postgrestInsert } from '../services/postgrest-client.js';
 import { createLogger } from '../utils/logger.js';
 import type { HypixelItemsResponse } from '../types/hypixel.js';
 
@@ -35,15 +36,26 @@ async function processJob(_job: Job): Promise<void> {
   }
   await cacheSet('warm', 'resources', 'item-lookup', itemLookup, response.lastUpdated);
 
+  try {
+    await postgrestInsert('resource_snapshots', {
+      resource_type: 'items',
+      version: String(response.lastUpdated),
+      raw_data: response as unknown as Record<string, unknown>,
+    });
+  } catch (err) {
+    log.error({ err }, 'Failed to insert items snapshot');
+  }
+
   log.info({ item_count: response.items.length }, 'Items updated');
 }
 
 export function startItemsTracker(): void {
   const queue = getQueue(QUEUE_NAME);
 
+  // Poll every 1s — conditional fetch skips when unchanged
   queue.upsertJobScheduler(
     'items-poll',
-    { every: 60_000 },
+    { every: 1000 },
     { name: 'items-poll' },
   );
 

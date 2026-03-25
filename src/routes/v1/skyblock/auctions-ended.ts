@@ -1,28 +1,8 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify';
-import { fetchEndedAuctions } from '../../../services/hypixel-client.js';
-import { cacheGet, cacheSet } from '../../../services/cache-manager.js';
+import { cacheGet } from '../../../services/cache-manager.js';
 import { enforceClientRateLimit } from '../../../services/rate-limiter.js';
+import { errors } from '../../../utils/errors.js';
 import type { HypixelEndedAuction } from '../../../types/hypixel.js';
-
-interface EndedAuctionSummary {
-  auction_id: string;
-  seller: string;
-  buyer: string;
-  price: number;
-  bin: boolean;
-  timestamp: number;
-}
-
-function summarizeEnded(auction: HypixelEndedAuction): EndedAuctionSummary {
-  return {
-    auction_id: auction.auction_id,
-    seller: auction.seller,
-    buyer: auction.buyer,
-    price: auction.price,
-    bin: auction.bin,
-    timestamp: auction.timestamp,
-  };
-}
 
 export async function auctionsEndedRoute(app: FastifyInstance): Promise<void> {
   app.get(
@@ -31,7 +11,7 @@ export async function auctionsEndedRoute(app: FastifyInstance): Promise<void> {
       schema: {
         tags: ['auctions'],
         summary: 'Get recently ended auctions',
-        description: 'Returns auctions that ended in the last 60 seconds. Updated by Hypixel every minute. Useful for tracking sale prices.',
+        description: 'Returns auctions that ended in the last 60 seconds. Data kept up-to-date by the auction-sold worker.',
         response: {
           200: {
             type: 'object',
@@ -41,6 +21,7 @@ export async function auctionsEndedRoute(app: FastifyInstance): Promise<void> {
               meta: { $ref: 'response-meta#' },
             },
           },
+          400: { $ref: 'error-response#' },
           429: { $ref: 'error-response#' },
         },
       },
@@ -48,9 +29,9 @@ export async function auctionsEndedRoute(app: FastifyInstance): Promise<void> {
     async (request: FastifyRequest) => {
       await enforceClientRateLimit(request.clientId, request.clientRateLimit);
 
-      // Check cache (short TTL — data changes every minute)
-      const cached = await cacheGet<EndedAuctionSummary[]>('hot', 'auctions-ended', 'latest');
-      if (cached && !cached.stale) {
+      // Read from cache populated by auction-sold worker
+      const cached = await cacheGet<HypixelEndedAuction[]>('hot', 'auctions-ended', 'latest');
+      if (cached) {
         return {
           success: true,
           data: { auctions: cached.data, count: cached.data.length },
@@ -58,15 +39,7 @@ export async function auctionsEndedRoute(app: FastifyInstance): Promise<void> {
         };
       }
 
-      const response = await fetchEndedAuctions();
-      const auctions = response.auctions.map(summarizeEnded);
-      await cacheSet('hot', 'auctions-ended', 'latest', auctions);
-
-      return {
-        success: true,
-        data: { auctions, count: auctions.length },
-        meta: { cached: false, cache_age_seconds: null, timestamp: Date.now() },
-      };
+      throw errors.validation('Ended auction data not available yet. The auction-sold worker may not have run.');
     },
   );
 }
