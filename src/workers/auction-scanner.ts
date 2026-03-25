@@ -15,6 +15,22 @@ const ENDING_SOON_WINDOW_MS = 120_000; // 2 minutes
 let lastModifiedHeader: string | undefined;
 let knownItemNames: Set<string> = new Set();
 
+// Persistent tracked auction state — survives across poll cycles
+interface TrackedAuction {
+  auction_id: string;
+  base_item: string;
+  skyblock_id: string | null;
+  item_name: string;
+  price: number;
+  seller_uuid: string;
+  ends_at: number;
+  tier: string;
+  category: string;
+  bin: boolean;
+}
+
+const trackedAuctions = new Map<string, TrackedAuction>();
+
 export interface AuctionItemData {
   item_name: string;
   price: number;
@@ -38,62 +54,99 @@ export interface LowestBinData {
  */
 function stripFormatting(itemName: string): string {
   let name = itemName;
-
-  // Strip leading special characters (⚚, etc.)
   name = name.replace(/^[^\w\[]+/, '');
-
-  // Strip pet level prefixes: "[Lvl N] ", "[N✦] ", "[N⚔] ", etc.
   name = name.replace(/^\[Lvl \d+\]\s*/, '');
   name = name.replace(/^\[\d+[^\]]*\]\s*/, '');
-
-  // Strip stars and upgrade symbols at end
   name = name.replace(/[\s✪✦➊➋➌➍➎⚚]+$/g, '').trim();
-
-  // Strip "Shiny " prefix
   if (name.startsWith('Shiny ')) {
     name = name.slice(6);
   }
-
   return name.trim();
 }
 
 /**
- * Extract a base item name by stripping formatting and reforges.
- * Uses the known items set from the items worker to determine whether
- * the first word is a reforge or part of the real item name.
- *
- * "Withered Hyperion ✪✪✪✪✪➎" -> "Hyperion"
- * "Wise Dragon Helmet ✪✪✪✪✪" -> "Wise Dragon Helmet" (real item)
- * "Fabled Wise Dragon Helmet" -> "Wise Dragon Helmet" (strips reforge only)
+ * Extract base item name using known items set for smart reforge detection.
  */
 function extractBaseItem(itemName: string): string {
   const stripped = stripFormatting(itemName);
-
-  // If the stripped name is already a known item, return it
-  if (knownItemNames.has(stripped)) {
-    return stripped;
-  }
-
-  // Try removing the first word (potential reforge) and check if the rest is a known item
+  if (knownItemNames.has(stripped)) return stripped;
   const firstSpace = stripped.indexOf(' ');
   if (firstSpace > 0) {
     const withoutFirst = stripped.slice(firstSpace + 1);
-    if (knownItemNames.has(withoutFirst)) {
-      return withoutFirst;
-    }
+    if (knownItemNames.has(withoutFirst)) return withoutFirst;
   }
-
-  // No match in known items — return the stripped name as-is
   return stripped;
 }
 
-// In-memory previous lowest BINs for change detection
+/**
+ * Process a raw Hypixel auction into a TrackedAuction.
+ * Only called for NEW auctions (not already tracked).
+ */
+function processNewAuction(auction: HypixelAuction, nameToId: Record<string, string>): TrackedAuction {
+  const baseItem = extractBaseItem(auction.item_name);
+  return {
+    auction_id: auction.uuid,
+    base_item: baseItem,
+    skyblock_id: nameToId[baseItem] ?? null,
+    item_name: auction.item_name,
+    price: auction.bin ? auction.starting_bid : auction.highest_bid_amount,
+    seller_uuid: auction.auctioneer,
+    ends_at: auction.end,
+    tier: auction.tier,
+    category: auction.category,
+    bin: auction.bin,
+  };
+}
+
+// Previous lowest BINs for alert detection
 let previousLowestBins = new Map<string, LowestBinData>();
+
+/**
+ * Build lowest BIN data from the full tracked auctions map.
+ */
+function buildLowestBins(): Map<string, LowestBinData> {
+  // Group BIN auctions by base item
+  const itemGroups = new Map<string, TrackedAuction[]>();
+  for (const auction of trackedAuctions.values()) {
+    if (!auction.bin) continue;
+    const group = itemGroups.get(auction.base_item);
+    if (group) {
+      group.push(auction);
+    } else {
+      itemGroups.set(auction.base_item, [auction]);
+    }
+  }
+
+  const lowestBins = new Map<string, LowestBinData>();
+  for (const [baseItem, auctions] of itemGroups) {
+    auctions.sort((a, b) => a.price - b.price);
+    const lowest = auctions[0]!;
+    const listings: AuctionItemData[] = auctions.slice(0, 20).map((a) => ({
+      item_name: a.item_name,
+      price: a.price,
+      auction_id: a.auction_id,
+      seller_uuid: a.seller_uuid,
+      ends_at: a.ends_at,
+      tier: a.tier,
+      category: a.category,
+    }));
+
+    lowestBins.set(baseItem, {
+      skyblock_id: lowest.skyblock_id,
+      base_item: baseItem,
+      lowest: listings[0]!,
+      listings,
+      count: auctions.length,
+    });
+  }
+
+  return lowestBins;
+}
 
 async function processAuctionJob(_job: Job): Promise<void> {
   const startTime = Date.now();
 
-  // Wait for items worker to populate known item names before processing
+  // Wait for items worker
   const itemNamesCache = await cacheGet<string[]>('warm', 'resources', 'item-known-names');
   if (!itemNamesCache) {
     log.info('Waiting for items worker to cache item names — skipping this cycle');
@@ -104,7 +157,7 @@ async function processAuctionJob(_job: Job): Promise<void> {
   const nameToIdCache = await cacheGet<Record<string, string>>('warm', 'resources', 'item-name-to-id');
   const nameToId = nameToIdCache?.data ?? {};
 
-  // Conditional fetch on page 0 — check if data has changed
+  // Conditional fetch on page 0
   const checkResult = await fetchConditional<HypixelAuctionsPageResponse>(
     { endpoint: '/v2/skyblock/auctions', params: { page: '0' } },
     lastModifiedHeader,
@@ -123,33 +176,31 @@ async function processAuctionJob(_job: Job): Promise<void> {
     return;
   }
 
-  // Collect all BIN auctions and ending-soon across all pages
-  const allBinAuctions: HypixelAuction[] = [];
+  // Collect all auction UUIDs from all pages
+  const allAuctions: HypixelAuction[] = [];
   const endingSoon: HypixelAuction[] = [];
   const now = Date.now();
 
-  function processPage(auctions: HypixelAuction[]): void {
+  function collectPage(auctions: HypixelAuction[]): void {
     for (const auction of auctions) {
-      if (auction.bin) {
-        allBinAuctions.push(auction);
-      }
+      allAuctions.push(auction);
       if (auction.end - now <= ENDING_SOON_WINDOW_MS && auction.end > now) {
         endingSoon.push(auction);
       }
     }
   }
 
-  // Process page 0 (already fetched)
-  processPage(firstPage.auctions);
+  // Page 0 already fetched
+  collectPage(firstPage.auctions);
 
+  // Fetch all remaining pages (priority then rest)
   const totalRemaining = firstPage.totalPages - 1;
-  const PRIORITY_PAGES = 15; // First N pages have the most actively traded items
+  const PRIORITY_PAGES = 15;
   const priorityCount = Math.min(PRIORITY_PAGES, totalRemaining);
   const remainingCount = totalRemaining - priorityCount;
   const fetchStart = Date.now();
-  let pagesSucceeded = 1; // page 0 already succeeded
+  let pagesSucceeded = 1;
 
-  // Fetch priority pages first (pages 1-15)
   const priorityPromises = Array.from(
     { length: priorityCount },
     (_, i) => fetchAuctionsPage(i + 1).catch((err) => {
@@ -161,12 +212,11 @@ async function processAuctionJob(_job: Job): Promise<void> {
   const priorityDuration = Date.now() - fetchStart;
   for (const pageData of priorityPages) {
     if (pageData?.success) {
-      processPage(pageData.auctions);
+      collectPage(pageData.auctions);
       pagesSucceeded++;
     }
   }
 
-  // Then fetch remaining pages (16+)
   if (remainingCount > 0) {
     const remainingPromises = Array.from(
       { length: remainingCount },
@@ -178,7 +228,7 @@ async function processAuctionJob(_job: Job): Promise<void> {
     const remainingPages = await Promise.all(remainingPromises);
     for (const pageData of remainingPages) {
       if (pageData?.success) {
-        processPage(pageData.auctions);
+        collectPage(pageData.auctions);
         pagesSucceeded++;
       }
     }
@@ -186,41 +236,31 @@ async function processAuctionJob(_job: Job): Promise<void> {
 
   const fetchDuration = Date.now() - fetchStart;
 
-  // Group BIN auctions by base item name, sorted by price
-  const itemGroups = new Map<string, AuctionItemData[]>();
-  for (const auction of allBinAuctions) {
-    const baseItem = extractBaseItem(auction.item_name);
-    const entry: AuctionItemData = {
-      item_name: auction.item_name,
-      price: auction.starting_bid,
-      auction_id: auction.uuid,
-      seller_uuid: auction.auctioneer,
-      ends_at: auction.end,
-      tier: auction.tier,
-      category: auction.category,
-    };
+  // --- All pages fetched. Now diff against tracked state ---
 
-    const group = itemGroups.get(baseItem);
-    if (group) {
-      group.push(entry);
-    } else {
-      itemGroups.set(baseItem, [entry]);
+  const newAuctionIds = new Set(allAuctions.map((a) => a.uuid));
+  let addedCount = 0;
+  let removedCount = 0;
+
+  // Add new auctions (not already tracked)
+  for (const auction of allAuctions) {
+    if (!trackedAuctions.has(auction.uuid)) {
+      trackedAuctions.set(auction.uuid, processNewAuction(auction, nameToId));
+      addedCount++;
     }
   }
 
-  // Build lowest BIN data per base item
-  const lowestBins = new Map<string, LowestBinData>();
-  for (const [baseItem, listings] of itemGroups) {
-    listings.sort((a, b) => a.price - b.price);
-    const lowest = listings[0]!;
-    lowestBins.set(baseItem, {
-      skyblock_id: nameToId[baseItem] ?? null,
-      base_item: baseItem,
-      lowest,
-      listings: listings.slice(0, 20), // Top 20 cheapest
-      count: listings.length,
-    });
+  // Remove expired auctions (tracked but no longer in API response)
+  for (const auctionId of trackedAuctions.keys()) {
+    if (!newAuctionIds.has(auctionId)) {
+      trackedAuctions.delete(auctionId);
+      removedCount++;
+    }
   }
+
+  // --- Rebuild lowest BINs from full tracked state ---
+
+  const lowestBins = buildLowestBins();
 
   // Publish alerts for new lowest BINs
   let alertsPublished = 0;
@@ -252,13 +292,13 @@ async function processAuctionJob(_job: Job): Promise<void> {
     });
   }
 
-  // Cache lowest BINs keyed by base item name
+  // --- Cache results ---
+
   const cacheEntries = Array.from(lowestBins.entries()).map(([baseItem, data]) => ({
     id: baseItem,
     data,
   }));
 
-  // Also cache keyed by skyblock_id for mod lookups
   const skyblockIdEntries: Array<{ id: string; data: LowestBinData }> = [];
   let unmatchedCount = 0;
   for (const data of lowestBins.values()) {
@@ -273,11 +313,9 @@ async function processAuctionJob(_job: Job): Promise<void> {
     await cacheSetBulk('hot', 'auction-lowest', cacheEntries, firstPage.lastUpdated);
     await cacheSetBulk('hot', 'auction-lowest-id', skyblockIdEntries, firstPage.lastUpdated);
 
-    // Store all lowest BINs as single key for bulk reads (keyed by base_item name)
     const allLowest = Object.fromEntries(lowestBins);
     await cacheSet('hot', 'auction-lowest-all', 'latest', allLowest, firstPage.lastUpdated);
 
-    // Store keyed by skyblock_id for mod consumption
     const allById: Record<string, LowestBinData> = {};
     for (const data of lowestBins.values()) {
       if (data.skyblock_id) {
@@ -295,12 +333,14 @@ async function processAuctionJob(_job: Job): Promise<void> {
 
   log.info({
     total_auctions: firstPage.totalAuctions,
+    tracked_auctions: trackedAuctions.size,
+    added: addedCount,
+    removed: removedCount,
     pages: firstPage.totalPages,
-    priority_pages: priorityCount + 1, // +1 for page 0
+    priority_pages: priorityCount + 1,
     priority_fetch_ms: priorityDuration,
     pages_succeeded: pagesSucceeded,
     fetch_duration_ms: fetchDuration,
-    bin_auctions: allBinAuctions.length,
     unique_items: lowestBins.size,
     ending_soon: endingSoon.length,
     alerts_published: alertsPublished,
@@ -311,7 +351,6 @@ async function processAuctionJob(_job: Job): Promise<void> {
 export function startAuctionScanner(): void {
   const queue = getQueue(QUEUE_NAME);
 
-  // Poll every 1s — conditional fetch skips processing when data hasn't changed
   queue.upsertJobScheduler(
     'auction-scan',
     { every: 1000 },
@@ -319,7 +358,5 @@ export function startAuctionScanner(): void {
   );
 
   createWorker(QUEUE_NAME, processAuctionJob);
-
-  // Fetch immediately on startup
   queue.add('auction-scan-immediate', {}, { priority: 1 });
 }
