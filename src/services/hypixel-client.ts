@@ -1,7 +1,7 @@
 import { env } from '../config/env.js';
 import { HYPIXEL_BASE_URL } from '../config/constants.js';
 import { errors } from '../utils/errors.js';
-import type { HypixelProfilesResponse } from '../types/hypixel.js';
+import type { HypixelProfilesResponse, HypixelProfileResponse } from '../types/hypixel.js';
 
 interface HypixelRequestOptions {
   endpoint: string;
@@ -71,10 +71,17 @@ async function fetchHypixel<T>(options: HypixelRequestOptions): Promise<T> {
   throw errors.hypixelRateLimited();
 }
 
-export async function fetchPlayerProfiles(uuid: string): Promise<HypixelProfilesResponse> {
+export async function fetchProfile(profileUuid: string): Promise<HypixelProfileResponse> {
+  return fetchHypixel<HypixelProfileResponse>({
+    endpoint: '/v2/skyblock/profile',
+    params: { profile: profileUuid },
+  });
+}
+
+export async function fetchPlayerProfiles(playerUuid: string): Promise<HypixelProfilesResponse> {
   return fetchHypixel<HypixelProfilesResponse>({
     endpoint: '/v2/skyblock/profiles',
-    params: { uuid },
+    params: { uuid: playerUuid },
   });
 }
 

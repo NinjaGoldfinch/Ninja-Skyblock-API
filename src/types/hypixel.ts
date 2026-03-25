@@ -70,3 +70,8 @@ export interface HypixelProfilesResponse {
   success: boolean;
   profiles: HypixelSkyBlockProfile[] | null;
 }
+
+export interface HypixelProfileResponse {
+  success: boolean;
+  profile: HypixelSkyBlockProfile | null;
+}

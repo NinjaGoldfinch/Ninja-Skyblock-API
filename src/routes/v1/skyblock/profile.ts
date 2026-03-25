@@ -1,5 +1,5 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify';
-import { fetchPlayerProfiles } from '../../../services/hypixel-client.js';
+import { fetchProfile } from '../../../services/hypixel-client.js';
 import { cacheGet, cacheSet } from '../../../services/cache-manager.js';
 import { enforceClientRateLimit } from '../../../services/rate-limiter.js';
 import { errors } from '../../../utils/errors.js';
@@ -7,10 +7,10 @@ import { computeSkills } from '../../../processors/skills.js';
 import { computeNetworth } from '../../../processors/networth.js';
 import { SLAYER_XP_THRESHOLDS, DUNGEON_XP_THRESHOLDS } from '../../../config/constants.js';
 import type { SkyBlockProfile } from '../../../types/skyblock.js';
-import type { HypixelProfilesResponse, HypixelProfileMember } from '../../../types/hypixel.js';
+import type { HypixelProfileResponse, HypixelProfileMember, HypixelSkyBlockProfile } from '../../../types/hypixel.js';
 
 interface ProfileParams {
-  uuid: string;
+  profileUuid: string;
 }
 
 function computeSlayerLevel(xp: number, thresholds: readonly number[]): number {
@@ -31,26 +31,10 @@ function computeDungeonLevel(xp: number): number {
   return level;
 }
 
-function extractProfile(response: HypixelProfilesResponse, uuid: string): SkyBlockProfile {
-  if (!response.profiles || response.profiles.length === 0) {
-    throw errors.profileNotFound(uuid);
-  }
+function buildProfileData(profile: HypixelSkyBlockProfile, memberUuid: string, member: HypixelProfileMember): SkyBlockProfile {
+  const skillData = computeSkills(memberUuid, member);
+  const networthData = computeNetworth(memberUuid, member, profile);
 
-  const profile = response.profiles.find((p) => p.selected) ?? response.profiles[0];
-  if (!profile) {
-    throw errors.profileNotFound(uuid);
-  }
-
-  const member: HypixelProfileMember | undefined = profile.members[uuid];
-  if (!member) {
-    throw errors.profileNotFound(uuid);
-  }
-
-  // Use processors for skills and networth
-  const skillData = computeSkills(uuid, member);
-  const networthData = computeNetworth(uuid, member, profile);
-
-  // Extract dungeons
   const dungeonData = member.dungeons;
   const catacombsXp = dungeonData?.dungeon_types?.catacombs?.experience ?? 0;
   const dungeons = {
@@ -66,7 +50,6 @@ function extractProfile(response: HypixelProfilesResponse, uuid: string): SkyBlo
     },
   };
 
-  // Extract slayers
   const slayers: Record<string, { level: number; xp: number }> = {};
   if (member.slayer_bosses) {
     for (const [boss, data] of Object.entries(member.slayer_bosses)) {
@@ -79,7 +62,7 @@ function extractProfile(response: HypixelProfilesResponse, uuid: string): SkyBlo
   const bankBalance = profile.banking?.balance ?? 0;
 
   return {
-    uuid,
+    uuid: memberUuid,
     profile_id: profile.profile_id,
     cute_name: profile.cute_name,
     selected: profile.selected,
@@ -95,28 +78,44 @@ function extractProfile(response: HypixelProfilesResponse, uuid: string): SkyBlo
   };
 }
 
+function extractProfile(response: HypixelProfileResponse, profileUuid: string): SkyBlockProfile {
+  if (!response.profile) {
+    throw errors.profileNotFound(profileUuid);
+  }
+
+  const profile = response.profile;
+  const memberEntries = Object.entries(profile.members);
+  if (memberEntries.length === 0) {
+    throw errors.profileNotFound(profileUuid);
+  }
+
+  // Use the first member — in Phase 2, a player UUID query param will select the member
+  const [memberUuid, member] = memberEntries[0] as [string, HypixelProfileMember];
+
+  return buildProfileData(profile, memberUuid, member);
+}
+
 export async function profileRoute(app: FastifyInstance): Promise<void> {
   app.get<{ Params: ProfileParams }>(
-    '/v1/skyblock/profile/:uuid',
+    '/v1/skyblock/profile/:profileUuid',
     {
       schema: {
         params: {
           type: 'object',
-          required: ['uuid'],
+          required: ['profileUuid'],
           properties: {
-            uuid: { type: 'string', pattern: '^[a-f0-9]{32}$' },
+            profileUuid: { type: 'string', pattern: '^[a-f0-9]{32}$' },
           },
         },
       },
     },
     async (request: FastifyRequest<{ Params: ProfileParams }>, reply) => {
-      const { uuid } = request.params;
+      const { profileUuid } = request.params;
 
-      // Rate limit check
       await enforceClientRateLimit(request.clientId);
 
       // Cache check
-      const cached = await cacheGet<SkyBlockProfile>('hot', 'profile', uuid);
+      const cached = await cacheGet<SkyBlockProfile>('hot', 'profile', profileUuid);
       if (cached && !cached.stale) {
         return {
           success: true,
@@ -125,12 +124,8 @@ export async function profileRoute(app: FastifyInstance): Promise<void> {
         };
       }
 
-      // If stale, return stale data but trigger background refresh
       if (cached && cached.stale) {
-        // Fire-and-forget background refresh
-        fetchAndCache(uuid).catch(() => {
-          // Silently ignore — stale data was already returned
-        });
+        fetchAndCache(profileUuid).catch(() => {});
         return {
           success: true,
           data: cached.data,
@@ -138,10 +133,10 @@ export async function profileRoute(app: FastifyInstance): Promise<void> {
         };
       }
 
-      // Cache miss — fetch from Hypixel
-      const profileData = await fetchAndCache(uuid);
+      // Cache miss
+      const profileData = await fetchAndCache(profileUuid);
 
-      void reply; // satisfy unused param lint
+      void reply;
       return {
         success: true,
         data: profileData,
@@ -151,9 +146,9 @@ export async function profileRoute(app: FastifyInstance): Promise<void> {
   );
 }
 
-async function fetchAndCache(uuid: string): Promise<SkyBlockProfile> {
-  const response = await fetchPlayerProfiles(uuid);
-  const profileData = extractProfile(response, uuid);
-  await cacheSet('hot', 'profile', uuid, profileData);
+async function fetchAndCache(profileUuid: string): Promise<SkyBlockProfile> {
+  const response = await fetchProfile(profileUuid);
+  const profileData = extractProfile(response, profileUuid);
+  await cacheSet('hot', 'profile', profileUuid, profileData);
   return profileData;
 }

@@ -34,6 +34,7 @@ Phase 1 Core — complete
 - Networth processor returns bank+purse only for now; full item valuation deferred to Phase 2 when price data is available
 - Sacks "value" in breakdown is item count, not coin value, until bazaar prices exist
 - Changed HYPIXEL_API_KEYS (plural, comma-split) to HYPIXEL_API_KEY (singular) — only one key per project
+- Profile route uses profile UUID (not player UUID). Calls Hypixel /v2/skyblock/profile?profile=UUID. Phase 2 will add separate endpoints for player-based lookups, active profile, etc.
 
 ## Next step
 Phase 1 Core complete. Next: Phase 1 "then" items (Pino logging, OpenAPI, remaining routes, tests).
