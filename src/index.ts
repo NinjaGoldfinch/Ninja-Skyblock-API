@@ -13,7 +13,14 @@ import { adminKeysRoute } from './routes/v1/admin/keys.js';
 import { setupWebSocket } from './routes/v1/events/subscribe.js';
 import { closeEventBus } from './services/event-bus.js';
 
-const app = Fastify({ logger });
+const app = Fastify({
+  logger: {
+    level: env.LOG_LEVEL,
+    transport: env.NODE_ENV === 'development'
+      ? { target: 'pino-pretty', options: { colorize: true } }
+      : undefined,
+  },
+});
 
 // Global error handler
 app.setErrorHandler((error, _request, reply) => {
