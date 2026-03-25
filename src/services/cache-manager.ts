@@ -86,6 +86,14 @@ export async function cacheSetBulk<T>(tier: CacheTier, resource: string, entries
   log.trace({ tier, resource, count: entries.length }, 'Bulk cache set');
 }
 
+export async function cacheRefreshTtl(tier: CacheTier, resource: string, id: string): Promise<void> {
+  const redis = getRedis();
+  const key = buildKey(tier, resource, id);
+  const ttl = getTtl(tier);
+  const extendedTtl = ttl * STALE_MULTIPLIER;
+  await redis.expire(key, extendedTtl);
+}
+
 export async function cacheDelete(tier: CacheTier, resource: string, id: string): Promise<void> {
   const redis = getRedis();
   const key = buildKey(tier, resource, id);

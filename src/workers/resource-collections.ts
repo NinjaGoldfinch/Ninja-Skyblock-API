@@ -1,7 +1,7 @@
 import type { Job } from 'bullmq';
 import { getQueue, createWorker } from '../utils/queue.js';
 import { fetchConditional } from '../services/hypixel-client.js';
-import { cacheSet } from '../services/cache-manager.js';
+import { cacheSet, cacheRefreshTtl } from '../services/cache-manager.js';
 import { postgrestInsert } from '../services/postgrest-client.js';
 import { contentHash } from '../utils/content-hash.js';
 import { createLogger } from '../utils/logger.js';
@@ -12,6 +12,7 @@ const QUEUE_NAME = 'resource-collections';
 
 let lastModifiedHeader: string | undefined;
 let lastContentHash: string | undefined;
+let lastTtlRefresh = 0;
 
 async function processJob(_job: Job): Promise<void> {
   const result = await fetchConditional<HypixelCollectionsResponse>(
@@ -20,9 +21,13 @@ async function processJob(_job: Job): Promise<void> {
   );
 
   if (!result.modified) {
-    log.trace('Collections data unchanged');
+    if (Date.now() - lastTtlRefresh > 60_000) {
+      lastTtlRefresh = Date.now();
+      await cacheRefreshTtl('warm', 'resources', 'collections');
+    }
     return;
   }
+  lastTtlRefresh = Date.now();
 
   const response = result.data!;
   lastModifiedHeader = result.lastModified ?? lastModifiedHeader;
