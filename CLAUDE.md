@@ -52,11 +52,21 @@ All phases complete. Remaining: bazaar data retention (deferred), additional rou
 ### Additional
 - [x] Watched players API (GET/POST/DELETE /v1/admin/watched-players)
 - [x] Auction lowest BIN endpoint (GET /v1/skyblock/auctions/lowest/:item)
+- [x] v1/v2 API split (v1 = raw proxy, v2 = computed)
+- [x] Resource workers (collections, skills, items, election) with content-hash dedup
+- [x] Item ID lookup table for smart reforge stripping in auctions
+- [x] Full auction lifecycle tracking (active → pending → sold/expired)
+- [x] Auction history stored in Postgres (auction_history table)
+- [x] Conditional polling (If-Modified-Since) for all workers at 1s interval
+- [x] Workers separated into independent Docker services
+- [x] HTTP/2 + 100 concurrent connections via undici
+- [x] Cache timestamps use Hypixel's lastUpdated (not fetch time)
+- [x] Immediate data fetch on worker startup
 
 ## What works
 - Step 1: `tsc --noEmit` passes, server boots with env vars set, exits cleanly on timeout
 - Step 2: env.ts parses all required/optional vars, exits on missing required vars
-- Step 3: Hypixel client compiles, key rotation round-robins, retry logic for 429/503/403
+- Step 3: Hypixel client compiles, retry logic for 429/503/403
 - Step 4: Cache manager with hot/warm tiers, stale-while-revalidate via extended TTL + age check
 - Step 5: Dual rate limiter using Redis INCR + EXPIRE, 60s sliding window
 - Step 6: Profile route registered, server boots, auth→cache→fetch→envelope flow implemented
