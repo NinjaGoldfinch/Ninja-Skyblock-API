@@ -5,7 +5,7 @@ ninja-skyblock-api — Backend API proxying Hypixel API for SkyBlock endpoints.
 See ARCHITECTURE.md for full specification.
 
 ## Current phase
-Phase 2 Core — step 1 of 4
+Phase 2 Core — step 3 of 4
 
 ## Completed steps
 
@@ -20,9 +20,9 @@ Phase 2 Core — step 1 of 4
 - [x] 8. Processors (networth, skills)
 
 ### Phase 2 Core
-- [ ] 1. BullMQ queue setup
-- [ ] 2. Bazaar tracker worker
-- [ ] 3. PostgreSQL schema (migrations)
+- [x] 1. BullMQ queue setup
+- [x] 2. Bazaar tracker worker
+- [x] 3. PostgreSQL schema (migrations)
 - [ ] 4. Bazaar history endpoint
 
 ## What works
@@ -34,6 +34,9 @@ Phase 2 Core — step 1 of 4
 - Step 6: Profile route registered, server boots, auth→cache→fetch→envelope flow implemented
 - Step 7: HMAC auth plugin, 401 on missing/invalid sig, replay protection via timestamp drift check
 - Step 8: Skills processor computes levels from XP thresholds; networth is placeholder (needs bazaar prices/NBT decoding)
+- Phase 2 Step 1: BullMQ queue factory creates named queues/workers backed by Redis
+- Phase 2 Step 2: Bazaar tracker polls Hypixel every 60s, caches products in warm tier, stores snapshots to Postgres
+- Phase 2 Step 3: Initial migration creates bazaar_snapshots, auction_sales, player_profiles tables
 
 ## Known issues
 - Networth computation is a placeholder — needs NBT inventory decoding and bazaar/AH price lookups (Phase 2 dependency)
@@ -45,4 +48,4 @@ Phase 2 Core — step 1 of 4
 - Profile route uses profile UUID (not player UUID). Calls Hypixel /v2/skyblock/profile?profile=UUID. Phase 2 will add separate endpoints for player-based lookups, active profile, etc.
 
 ## Next step
-Phase 2 Step 2: Bazaar tracker worker — polls Hypixel, stores snapshots via PostgREST, updates warm cache.
+Phase 2 Step 4: Bazaar history endpoint — reads from Postgres, returns time-series data.

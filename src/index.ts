@@ -3,7 +3,10 @@ import { env } from './config/env.js';
 import { AppError } from './utils/errors.js';
 import { closeRedis } from './utils/redis.js';
 import { profileRoute } from './routes/v1/skyblock/profile.js';
+import { bazaarRoute } from './routes/v1/skyblock/bazaar.js';
 import { authPlugin } from './plugins/auth.js';
+import { startBazaarTracker } from './workers/bazaar-tracker.js';
+import { closeQueues } from './utils/queue.js';
 
 const app = Fastify();
 
@@ -40,6 +43,7 @@ app.register(authPlugin);
 
 // Routes
 app.register(profileRoute);
+app.register(bazaarRoute);
 
 // Health check
 app.get('/v1/health', async () => {
@@ -49,7 +53,9 @@ app.get('/v1/health', async () => {
 const start = async () => {
   try {
     await app.listen({ port: env.PORT, host: '0.0.0.0' });
+    startBazaarTracker();
   } catch (err) {
+    await closeQueues();
     await closeRedis();
     process.exit(1);
   }
