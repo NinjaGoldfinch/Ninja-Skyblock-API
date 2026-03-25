@@ -1,8 +1,9 @@
 import type { Job } from 'bullmq';
 import { getQueue, createWorker } from '../utils/queue.js';
 import { fetchBazaar } from '../services/hypixel-client.js';
-import { cacheSet } from '../services/cache-manager.js';
+import { cacheGet, cacheSet } from '../services/cache-manager.js';
 import { postgrestInsert } from '../services/postgrest-client.js';
+import { publish } from '../services/event-bus.js';
 import { env } from '../config/env.js';
 import type { HypixelBazaarProduct } from '../types/hypixel.js';
 
@@ -54,9 +55,29 @@ async function processBazaarJob(_job: Job): Promise<void> {
   const products = Object.entries(response.products);
   const snapshotRows: BazaarSnapshotRow[] = [];
 
+  const PRICE_CHANGE_THRESHOLD = 0.05; // 5%
+
   for (const [productId, product] of products) {
     const data = transformProduct(productId, product);
     snapshotRows.push(data);
+
+    // Check previous price for alert publishing
+    const previous = await cacheGet<BazaarProductData>('warm', 'bazaar', productId);
+    if (previous && previous.data.buy_price > 0) {
+      const changePct = Math.abs(data.buy_price - previous.data.buy_price) / previous.data.buy_price;
+      if (changePct >= PRICE_CHANGE_THRESHOLD) {
+        await publish('bazaar:alerts', {
+          type: 'bazaar:price_change',
+          item_id: productId,
+          old_buy_price: previous.data.buy_price,
+          new_buy_price: data.buy_price,
+          old_sell_price: previous.data.sell_price,
+          new_sell_price: data.sell_price,
+          change_pct: Math.round(changePct * 10000) / 100,
+          timestamp: Date.now(),
+        });
+      }
+    }
 
     // Update warm cache for each product
     await cacheSet('warm', 'bazaar', productId, data);

@@ -7,6 +7,9 @@ import { bazaarRoute } from './routes/v1/skyblock/bazaar.js';
 import { authPlugin } from './plugins/auth.js';
 import { startBazaarTracker } from './workers/bazaar-tracker.js';
 import { closeQueues } from './utils/queue.js';
+import { sseRoute } from './routes/v1/events/stream.js';
+import { setupWebSocket } from './routes/v1/events/subscribe.js';
+import { closeEventBus } from './services/event-bus.js';
 
 const app = Fastify();
 
@@ -44,6 +47,7 @@ app.register(authPlugin);
 // Routes
 app.register(profileRoute);
 app.register(bazaarRoute);
+app.register(sseRoute);
 
 // Health check
 app.get('/v1/health', async () => {
@@ -53,9 +57,18 @@ app.get('/v1/health', async () => {
 const start = async () => {
   try {
     await app.listen({ port: env.PORT, host: '0.0.0.0' });
+
+    // Start background workers
     startBazaarTracker();
+
+    // Attach WebSocket server to the underlying HTTP server
+    const httpServer = app.server;
+    await setupWebSocket(httpServer);
   } catch (err) {
+    process.stderr.write(`FATAL: ${err instanceof Error ? err.message : String(err)}\n`);
+    if (err instanceof Error && err.stack) process.stderr.write(`${err.stack}\n`);
     await closeQueues();
+    await closeEventBus();
     await closeRedis();
     process.exit(1);
   }

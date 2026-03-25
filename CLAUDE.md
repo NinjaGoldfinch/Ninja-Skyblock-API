@@ -5,7 +5,7 @@ ninja-skyblock-api — Backend API proxying Hypixel API for SkyBlock endpoints.
 See ARCHITECTURE.md for full specification.
 
 ## Current phase
-Phase 2 Core — complete
+Phase 3 Core — complete
 
 ## Completed steps
 
@@ -25,6 +25,11 @@ Phase 2 Core — complete
 - [x] 3. PostgreSQL schema (migrations)
 - [x] 4. Bazaar history endpoint
 
+### Phase 3 Core
+- [x] 1. Redis pub/sub event bus (src/services/event-bus.ts)
+- [x] 2. SSE endpoint (GET /v1/events/bazaar/stream)
+- [x] 3. WebSocket server (WS /v1/events/subscribe)
+
 ## What works
 - Step 1: `tsc --noEmit` passes, server boots with env vars set, exits cleanly on timeout
 - Step 2: env.ts parses all required/optional vars, exits on missing required vars
@@ -38,9 +43,11 @@ Phase 2 Core — complete
 - Phase 2 Step 2: Bazaar tracker polls Hypixel every 60s, caches products in warm tier, stores snapshots to Postgres
 - Phase 2 Step 3: Initial migration creates bazaar_snapshots, auction_sales, player_profiles tables
 - Phase 2 Step 4: Bazaar current price endpoint (from warm cache) and history endpoint (from Postgres)
+- Phase 3: Event bus publishes bazaar price changes (>5% delta). SSE streams to web clients. WebSocket supports channel subscriptions with item filters.
 
 ## Known issues
 - Networth computation is a placeholder — needs NBT inventory decoding and bazaar/AH price lookups (Phase 2 dependency)
+- Bazaar history averages are computed in Node over all rows — should move to Postgres aggregation before data grows large (weeks of snapshots)
 
 ## Decisions made
 - Networth processor returns bank+purse only for now; full item valuation deferred to Phase 2 when price data is available
@@ -49,4 +56,4 @@ Phase 2 Core — complete
 - Profile route uses profile UUID (not player UUID). Calls Hypixel /v2/skyblock/profile?profile=UUID. Phase 2 will add separate endpoints for player-based lookups, active profile, etc.
 
 ## Next step
-Phase 2 Core complete. Next: Phase 2 "then" items (auction scanner, profile tracker) or Phase 3.
+Phase 3 Core complete. Next: Phase 4 (API key management, public rate limiting, Discord bot) or Phase 2/3 "then" items.
