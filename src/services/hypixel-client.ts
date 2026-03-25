@@ -10,10 +10,11 @@ import type {
 
 const log = createLogger('hypixel-client');
 
-// Allow up to 100 concurrent connections per origin (default is ~10)
+// Allow up to 100 concurrent connections with HTTP/2 support
 setGlobalDispatcher(new Agent({
   connections: 100,
   pipelining: 1,
+  allowH2: true,
 }));
 
 interface HypixelRequestOptions {
