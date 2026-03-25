@@ -2,7 +2,7 @@ import type { Job } from 'bullmq';
 import { getQueue, createWorker } from '../utils/queue.js';
 import { fetchAuctionsPage, fetchConditional } from '../services/hypixel-client.js';
 import { cacheGet, cacheSet, cacheSetBulk } from '../services/cache-manager.js';
-import { postgrestInsert } from '../services/postgrest-client.js';
+import { postgrestInsert, postgrestSelect } from '../services/postgrest-client.js';
 import { publish } from '../services/event-bus.js';
 import { createLogger } from '../utils/logger.js';
 import type { HypixelAuction, HypixelAuctionsPageResponse, HypixelEndedAuctionsResponse } from '../types/hypixel.js';
@@ -173,7 +173,7 @@ function buildLowestBins(): Map<string, LowestBinData> {
   return lowestBins;
 }
 
-function toHistoryRow(auction: TrackedAuction, outcome: 'sold' | 'expired' | 'cancelled', buyerUuid: string | null, finalPrice: number): AuctionHistoryRow {
+function toHistoryRow(auction: TrackedAuction, outcome: 'sold' | 'expired' | 'cancelled', buyerUuid: string | null, finalPrice: number, itemBytes: string | null): AuctionHistoryRow {
   return {
     auction_id: auction.auction_id,
     skyblock_id: auction.skyblock_id,
@@ -189,7 +189,8 @@ function toHistoryRow(auction: TrackedAuction, outcome: 'sold' | 'expired' | 'ca
     outcome,
     started_at: new Date(auction.starts_at).toISOString(),
     ended_at: new Date().toISOString(),
-    item_bytes: null, // Stored separately in auction_item_data table
+    item_bytes: itemBytes,
+
   };
 }
 
@@ -217,6 +218,24 @@ async function processEndedAuctions(): Promise<{ soldCount: number; expiredCount
     recentlySoldIds.add(ended.auction_id);
   }
 
+  // Batch-fetch item_bytes for pending auctions from Postgres
+  const pendingIds = Array.from(pendingAuctions.keys());
+  const itemBytesMap = new Map<string, string>();
+  if (pendingIds.length > 0) {
+    try {
+      const rows = await postgrestSelect<{ auction_id: string; item_bytes: string }>({
+        table: 'auction_item_data',
+        query: { auction_id: `in.(${pendingIds.join(',')})` },
+        select: 'auction_id,item_bytes',
+      });
+      for (const row of rows) {
+        itemBytesMap.set(row.auction_id, row.item_bytes);
+      }
+    } catch {
+      // auction_item_data may not exist yet
+    }
+  }
+
   // Process pending auctions against sold list
   const historyRows: AuctionHistoryRow[] = [];
   let soldCount = 0;
@@ -225,13 +244,12 @@ async function processEndedAuctions(): Promise<{ soldCount: number; expiredCount
 
   for (const [auctionId, pending] of pendingAuctions) {
     if (recentlySoldIds.has(auctionId)) {
-      // Confirmed sold — find buyer/price from ended data
       const endedData = response.auctions.find((e) => e.auction_id === auctionId);
       const finalPrice = endedData?.price ?? pending.auction.price;
       const buyerUuid = endedData?.buyer ?? null;
-      historyRows.push(toHistoryRow(pending.auction, 'sold', buyerUuid, finalPrice));
+      const itemBytes = itemBytesMap.get(auctionId) ?? null;
+      historyRows.push(toHistoryRow(pending.auction, 'sold', buyerUuid, finalPrice, itemBytes));
 
-      // Publish sold event
       await publish('auction:sold', {
         type: 'auction:sold',
         auction_id: auctionId,
@@ -248,12 +266,11 @@ async function processEndedAuctions(): Promise<{ soldCount: number; expiredCount
       pendingAuctions.delete(auctionId);
       soldCount++;
     } else if (now - pending.removed_at > PENDING_TIMEOUT_MS) {
-      // Timed out — mark as expired/cancelled
-      historyRows.push(toHistoryRow(pending.auction, 'expired', null, 0));
+      const itemBytes = itemBytesMap.get(auctionId) ?? null;
+      historyRows.push(toHistoryRow(pending.auction, 'expired', null, 0, itemBytes));
       pendingAuctions.delete(auctionId);
       expiredCount++;
     }
-    // Otherwise: still pending, wait for next ended update
   }
 
   // Store to Postgres
