@@ -1,16 +1,18 @@
 import type { Job } from 'bullmq';
 import { getQueue, createWorker } from '../utils/queue.js';
-import { fetchAuctionsPage } from '../services/hypixel-client.js';
+import { fetchAuctionsPage, fetchConditional } from '../services/hypixel-client.js';
 import { cacheSetBulk } from '../services/cache-manager.js';
 import { publish } from '../services/event-bus.js';
-import { env } from '../config/env.js';
 import { createLogger } from '../utils/logger.js';
-import type { HypixelAuction } from '../types/hypixel.js';
+import type { HypixelAuction, HypixelAuctionsPageResponse } from '../types/hypixel.js';
 
 const log = createLogger('auction-scanner');
 const QUEUE_NAME = 'auction-scanner';
 
 const ENDING_SOON_WINDOW_MS = 120_000; // 2 minutes
+
+// In-memory state for conditional polling
+let lastModifiedHeader: string | undefined;
 
 // Known reforge prefixes to strip when extracting base item name
 const REFORGE_PREFIXES = [
@@ -85,7 +87,20 @@ let previousLowestBins = new Map<string, LowestBinData>();
 async function processAuctionJob(_job: Job): Promise<void> {
   const startTime = Date.now();
 
-  const firstPage = await fetchAuctionsPage(0);
+  // Conditional fetch on page 0 — check if data has changed
+  const checkResult = await fetchConditional<HypixelAuctionsPageResponse>(
+    { endpoint: '/v2/skyblock/auctions', params: { page: '0' } },
+    lastModifiedHeader,
+  );
+
+  if (!checkResult.modified) {
+    log.trace('Auction data unchanged, skipping');
+    return;
+  }
+
+  const firstPage = checkResult.data!;
+  lastModifiedHeader = checkResult.lastModified ?? lastModifiedHeader;
+
   if (!firstPage.success) {
     log.warn('Auction fetch returned success=false');
     return;
@@ -107,8 +122,10 @@ async function processAuctionJob(_job: Job): Promise<void> {
     }
   }
 
+  // Process page 0 (already fetched)
   processPage(firstPage.auctions);
 
+  // Fetch remaining pages (page 0 already parsed, start from 1)
   for (let page = 1; page < firstPage.totalPages; page++) {
     try {
       const pageData = await fetchAuctionsPage(page);
@@ -209,9 +226,10 @@ async function processAuctionJob(_job: Job): Promise<void> {
 export function startAuctionScanner(): void {
   const queue = getQueue(QUEUE_NAME);
 
+  // Poll every 1s — conditional fetch skips processing when data hasn't changed
   queue.upsertJobScheduler(
     'auction-scan',
-    { every: env.AUCTION_POLL_INTERVAL },
+    { every: 1000 },
     { name: 'auction-scan' },
   );
 

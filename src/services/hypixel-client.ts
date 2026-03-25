@@ -124,4 +124,72 @@ export async function fetchEndedAuctions(): Promise<HypixelEndedAuctionsResponse
   });
 }
 
+export interface ConditionalFetchResult<T> {
+  modified: boolean;
+  data: T | null;
+  lastModified: string | null;
+  lastUpdated: number | null;
+}
+
+/**
+ * Fetch with If-Modified-Since header. Returns modified=false if
+ * the server returns 304 or the last-modified header hasn't changed.
+ * Avoids parsing the full JSON body when data hasn't been updated.
+ */
+export async function fetchConditional<T>(
+  options: HypixelRequestOptions,
+  ifModifiedSince?: string,
+): Promise<ConditionalFetchResult<T>> {
+  const url = new URL(options.endpoint, HYPIXEL_BASE_URL);
+  if (options.params) {
+    for (const [key, value] of Object.entries(options.params)) {
+      url.searchParams.set(key, value);
+    }
+  }
+
+  const headers: Record<string, string> = {
+    'API-Key': env.HYPIXEL_API_KEY,
+    'Accept': 'application/json',
+  };
+  if (ifModifiedSince) {
+    headers['If-Modified-Since'] = ifModifiedSince;
+  }
+
+  const startTime = Date.now();
+  const response = await fetch(url.toString(), { headers });
+
+  // 304 Not Modified — data hasn't changed
+  if (response.status === 304) {
+    log.trace({ endpoint: options.endpoint }, 'Not modified (304)');
+    return { modified: false, data: null, lastModified: ifModifiedSince ?? null, lastUpdated: null };
+  }
+
+  if (!response.ok) {
+    // Fall through to normal error handling for non-2xx
+    if (response.status === 403) throw errors.hypixelError(new Error('403 Forbidden'));
+    if (response.status === 429) throw errors.hypixelRateLimited();
+    if (response.status === 503) throw errors.hypixelDown();
+    throw errors.hypixelError(new Error(`Hypixel API returned ${response.status}`));
+  }
+
+  const lastModified = response.headers.get('last-modified');
+
+  // If last-modified matches what we already have, skip parsing
+  if (ifModifiedSince && lastModified === ifModifiedSince) {
+    log.trace({ endpoint: options.endpoint }, 'Same last-modified, skipping parse');
+    return { modified: false, data: null, lastModified, lastUpdated: null };
+  }
+
+  const data = await response.json() as T;
+  const lastUpdated = (data as Record<string, unknown>)['lastUpdated'] as number | undefined;
+  log.debug({ endpoint: options.endpoint, duration_ms: Date.now() - startTime }, 'Conditional fetch — new data');
+
+  return {
+    modified: true,
+    data,
+    lastModified,
+    lastUpdated: lastUpdated ?? null,
+  };
+}
+
 export { fetchHypixel };

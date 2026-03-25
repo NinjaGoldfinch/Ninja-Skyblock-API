@@ -1,18 +1,19 @@
 import type { Job } from 'bullmq';
 import { getQueue, createWorker } from '../utils/queue.js';
-import { fetchBazaar } from '../services/hypixel-client.js';
+import { fetchConditional } from '../services/hypixel-client.js';
 import { cacheSetBulk } from '../services/cache-manager.js';
 import { postgrestInsert } from '../services/postgrest-client.js';
 import { publish } from '../services/event-bus.js';
 import { env } from '../config/env.js';
-import type { HypixelBazaarProduct } from '../types/hypixel.js';
+import type { HypixelBazaarProduct, HypixelBazaarResponse } from '../types/hypixel.js';
 import { createLogger } from '../utils/logger.js';
 
 const log = createLogger('bazaar-tracker');
 const QUEUE_NAME = 'bazaar-tracker';
 
-// In-memory previous snapshot for price comparison (avoids 3700 Redis reads per poll)
+// In-memory state
 let previousSnapshot = new Map<string, BazaarProductData>();
+let lastModifiedHeader: string | undefined;
 
 interface RawSnapshotRow {
   item_id: string;
@@ -66,7 +67,21 @@ function transformProduct(productId: string, product: HypixelBazaarProduct): Baz
 
 async function processBazaarJob(_job: Job): Promise<void> {
   const startTime = Date.now();
-  const response = await fetchBazaar();
+
+  // Conditional fetch — skip processing if data hasn't changed
+  const result = await fetchConditional<HypixelBazaarResponse>(
+    { endpoint: '/v2/skyblock/bazaar' },
+    lastModifiedHeader,
+  );
+
+  if (!result.modified) {
+    log.trace('Bazaar data unchanged, skipping');
+    return;
+  }
+
+  const response = result.data!;
+  lastModifiedHeader = result.lastModified ?? lastModifiedHeader;
+
   if (!response.success) {
     log.warn('Bazaar fetch returned success=false');
     return;
@@ -145,9 +160,10 @@ async function processBazaarJob(_job: Job): Promise<void> {
 export function startBazaarTracker(): void {
   const queue = getQueue(QUEUE_NAME);
 
+  // Poll every 1s — conditional fetch skips processing when data hasn't changed
   queue.upsertJobScheduler(
     'bazaar-poll',
-    { every: env.BAZAAR_POLL_INTERVAL },
+    { every: 1000 },
     { name: 'bazaar-poll' },
   );
 
