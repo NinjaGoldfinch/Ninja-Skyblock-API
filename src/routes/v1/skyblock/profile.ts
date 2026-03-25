@@ -3,96 +3,10 @@ import { fetchProfile } from '../../../services/hypixel-client.js';
 import { cacheGet, cacheSet } from '../../../services/cache-manager.js';
 import { enforceClientRateLimit } from '../../../services/rate-limiter.js';
 import { errors } from '../../../utils/errors.js';
-import { computeSkills } from '../../../processors/skills.js';
-import { computeNetworth } from '../../../processors/networth.js';
-import { SLAYER_XP_THRESHOLDS, DUNGEON_XP_THRESHOLDS } from '../../../config/constants.js';
-import type { SkyBlockProfile } from '../../../types/skyblock.js';
-import type { HypixelProfileResponse, HypixelProfileMember, HypixelSkyBlockProfile } from '../../../types/hypixel.js';
+import type { HypixelSkyBlockProfile } from '../../../types/hypixel.js';
 
 interface ProfileParams {
   profileUuid: string;
-}
-
-function computeSlayerLevel(xp: number, thresholds: readonly number[]): number {
-  let level = 0;
-  for (let i = 1; i < thresholds.length; i++) {
-    if (thresholds[i] === undefined || xp < (thresholds[i] as number)) break;
-    level = i;
-  }
-  return level;
-}
-
-function computeDungeonLevel(xp: number): number {
-  let level = 0;
-  for (let i = 1; i < DUNGEON_XP_THRESHOLDS.length; i++) {
-    if (DUNGEON_XP_THRESHOLDS[i] === undefined || xp < (DUNGEON_XP_THRESHOLDS[i] as number)) break;
-    level = i;
-  }
-  return level;
-}
-
-function buildProfileData(profile: HypixelSkyBlockProfile, memberUuid: string, member: HypixelProfileMember): SkyBlockProfile {
-  const skillData = computeSkills(memberUuid, member);
-  const networthData = computeNetworth(memberUuid, member, profile);
-
-  const dungeonData = member.dungeons;
-  const catacombsXp = dungeonData?.dungeon_types?.catacombs?.experience ?? 0;
-  const dungeons = {
-    catacombs_level: computeDungeonLevel(catacombsXp),
-    secrets_found: dungeonData?.secrets ?? 0,
-    selected_class: dungeonData?.selected_dungeon_class ?? 'none',
-    class_levels: {
-      healer: computeDungeonLevel(dungeonData?.player_classes?.['healer']?.experience ?? 0),
-      mage: computeDungeonLevel(dungeonData?.player_classes?.['mage']?.experience ?? 0),
-      berserk: computeDungeonLevel(dungeonData?.player_classes?.['berserk']?.experience ?? 0),
-      archer: computeDungeonLevel(dungeonData?.player_classes?.['archer']?.experience ?? 0),
-      tank: computeDungeonLevel(dungeonData?.player_classes?.['tank']?.experience ?? 0),
-    },
-  };
-
-  const slayers: Record<string, { level: number; xp: number }> = {};
-  if (member.slayer_bosses) {
-    for (const [boss, data] of Object.entries(member.slayer_bosses)) {
-      const xp = data.xp ?? 0;
-      const thresholds = SLAYER_XP_THRESHOLDS[boss] ?? SLAYER_XP_THRESHOLDS['zombie'] ?? [];
-      slayers[boss] = { level: computeSlayerLevel(xp, thresholds), xp };
-    }
-  }
-
-  const bankBalance = profile.banking?.balance ?? 0;
-
-  return {
-    uuid: memberUuid,
-    profile_id: profile.profile_id,
-    cute_name: profile.cute_name,
-    selected: profile.selected,
-    skills: skillData.skills,
-    skill_average: skillData.skill_average,
-    networth: {
-      total: networthData.total,
-      breakdown: networthData.breakdown,
-    },
-    dungeons,
-    slayers,
-    bank_balance: bankBalance,
-  };
-}
-
-function extractProfile(response: HypixelProfileResponse, profileUuid: string): SkyBlockProfile {
-  if (!response.profile) {
-    throw errors.profileNotFound(profileUuid);
-  }
-
-  const profile = response.profile;
-  const memberEntries = Object.entries(profile.members);
-  if (memberEntries.length === 0) {
-    throw errors.profileNotFound(profileUuid);
-  }
-
-  // Use the first member — in Phase 2, a player UUID query param will select the member
-  const [memberUuid, member] = memberEntries[0] as [string, HypixelProfileMember];
-
-  return buildProfileData(profile, memberUuid, member);
 }
 
 export async function profileRoute(app: FastifyInstance): Promise<void> {
@@ -101,8 +15,8 @@ export async function profileRoute(app: FastifyInstance): Promise<void> {
     {
       schema: {
         tags: ['skyblock'],
-        summary: 'Get SkyBlock profile',
-        description: 'Returns a SkyBlock profile by profile UUID, including skills, slayers, dungeon stats, and bank balance.\n\n**Caching:** Responses are cached for 60 seconds with stale-while-revalidate.',
+        summary: 'Get raw SkyBlock profile',
+        description: 'Returns raw Hypixel profile data for a profile UUID. No processing or computed fields.',
         params: {
           type: 'object',
           required: ['profileUuid'],
@@ -119,7 +33,7 @@ export async function profileRoute(app: FastifyInstance): Promise<void> {
             type: 'object',
             properties: {
               success: { type: 'boolean', const: true },
-              data: { type: 'object', additionalProperties: true, description: 'Processed SkyBlock profile data.' },
+              data: { type: 'object', additionalProperties: true, description: 'Raw Hypixel profile data.' },
               meta: { $ref: 'response-meta#' },
             },
           },
@@ -128,13 +42,12 @@ export async function profileRoute(app: FastifyInstance): Promise<void> {
         },
       },
     },
-    async (request: FastifyRequest<{ Params: ProfileParams }>, reply) => {
+    async (request: FastifyRequest<{ Params: ProfileParams }>) => {
       const profileUuid = request.params.profileUuid.replaceAll('-', '');
-
       await enforceClientRateLimit(request.clientId, request.clientRateLimit);
 
       // Cache check
-      const cached = await cacheGet<SkyBlockProfile>('hot', 'profile', profileUuid);
+      const cached = await cacheGet<HypixelSkyBlockProfile>('hot', 'raw-profile', profileUuid);
       if (cached && !cached.stale) {
         return {
           success: true,
@@ -152,22 +65,21 @@ export async function profileRoute(app: FastifyInstance): Promise<void> {
         };
       }
 
-      // Cache miss
-      const profileData = await fetchAndCache(profileUuid);
-
-      void reply;
+      const data = await fetchAndCache(profileUuid);
       return {
         success: true,
-        data: profileData,
+        data,
         meta: { cached: false, cache_age_seconds: null, timestamp: Date.now() },
       };
     },
   );
 }
 
-async function fetchAndCache(profileUuid: string): Promise<SkyBlockProfile> {
+async function fetchAndCache(profileUuid: string): Promise<HypixelSkyBlockProfile> {
   const response = await fetchProfile(profileUuid);
-  const profileData = extractProfile(response, profileUuid);
-  await cacheSet('hot', 'profile', profileUuid, profileData);
-  return profileData;
+  if (!response.profile) {
+    throw errors.profileNotFound(profileUuid);
+  }
+  await cacheSet('hot', 'raw-profile', profileUuid, response.profile);
+  return response.profile;
 }

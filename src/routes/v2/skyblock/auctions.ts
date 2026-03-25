@@ -47,10 +47,10 @@ async function searchAuctionCache(searchTerm: string): Promise<LowestBinData | n
   return bestMatch?.data ?? null;
 }
 
-export async function auctionsRoute(app: FastifyInstance): Promise<void> {
-  // GET /v1/skyblock/auctions/lowest/:item — lowest BIN for an item
+export async function v2AuctionsRoute(app: FastifyInstance): Promise<void> {
+  // GET /v2/skyblock/auctions/lowest/:item — lowest BIN for an item
   app.get<{ Params: AuctionParams }>(
-    '/v1/skyblock/auctions/lowest/:item',
+    '/v2/skyblock/auctions/lowest/:item',
     {
       schema: {
         tags: ['auctions'],
@@ -105,9 +105,9 @@ export async function auctionsRoute(app: FastifyInstance): Promise<void> {
     },
   );
 
-  // GET /v1/skyblock/auctions/search — search auctions by name
+  // GET /v2/skyblock/auctions/search — search auctions by name
   app.get<{ Querystring: AuctionQuery }>(
-    '/v1/skyblock/auctions/search',
+    '/v2/skyblock/auctions/search',
     {
       schema: {
         tags: ['auctions'],

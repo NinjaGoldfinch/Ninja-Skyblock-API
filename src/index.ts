@@ -5,6 +5,14 @@ import { closeRedis } from './utils/redis.js';
 import { logger } from './utils/logger.js';
 import { profileRoute } from './routes/v1/skyblock/profile.js';
 import { bazaarRoute } from './routes/v1/skyblock/bazaar.js';
+import { profilesRoute } from './routes/v1/skyblock/profiles.js';
+import { playerAuctionsRoute } from './routes/v1/skyblock/player-auctions.js';
+import { auctionsEndedRoute } from './routes/v1/skyblock/auctions-ended.js';
+import { playerUuidRoute } from './routes/v1/player/uuid.js';
+import { playerUsernameRoute } from './routes/v1/player/username.js';
+import { v2ProfileRoute } from './routes/v2/skyblock/profile.js';
+import { v2BazaarRoute } from './routes/v2/skyblock/bazaar.js';
+import { v2AuctionsRoute } from './routes/v2/skyblock/auctions.js';
 import { authPlugin } from './plugins/auth.js';
 import { startBazaarTracker } from './workers/bazaar-tracker.js';
 import { startAuctionScanner } from './workers/auction-scanner.js';
@@ -13,11 +21,6 @@ import { closeQueues } from './utils/queue.js';
 import { sseRoute } from './routes/v1/events/stream.js';
 import { adminKeysRoute } from './routes/v1/admin/keys.js';
 import { watchedPlayersRoute } from './routes/v1/admin/watched-players.js';
-import { auctionsRoute } from './routes/v1/skyblock/auctions.js';
-import { profilesRoute } from './routes/v1/skyblock/profiles.js';
-import { playerAuctionsRoute } from './routes/v1/skyblock/player-auctions.js';
-import { auctionsEndedRoute } from './routes/v1/skyblock/auctions-ended.js';
-import { playerUuidRoute } from './routes/v1/player/uuid.js';
 import { setupWebSocket } from './routes/v1/events/subscribe.js';
 import { closeEventBus } from './services/event-bus.js';
 import { swaggerPlugin } from './plugins/swagger.js';
@@ -70,15 +73,24 @@ registerSharedSchemas(app);
 // Auth
 app.register(authPlugin);
 
-// Routes
+// v1 routes — raw Hypixel proxy (no processing)
 app.register(profileRoute);
 app.register(bazaarRoute);
-app.register(sseRoute);
-app.register(auctionsRoute);
 app.register(profilesRoute);
 app.register(playerAuctionsRoute);
 app.register(auctionsEndedRoute);
 app.register(playerUuidRoute);
+app.register(playerUsernameRoute);
+
+// v2 routes — computed/processed data
+app.register(v2ProfileRoute);
+app.register(v2BazaarRoute);
+app.register(v2AuctionsRoute);
+
+// Events
+app.register(sseRoute);
+
+// Admin
 app.register(adminKeysRoute);
 app.register(watchedPlayersRoute);
 

@@ -58,15 +58,27 @@ Requires Redis running on `localhost:6379`. Configure via `.env`.
 
 ## API Endpoints
 
-### SkyBlock Data
+### v1 — Raw Hypixel Proxy (no processing)
 
 | Method | Path | Description |
 |--------|------|-------------|
-| GET | `/v1/skyblock/profile/:profileUuid` | SkyBlock profile by profile UUID |
-| GET | `/v1/skyblock/bazaar/:itemId` | Current bazaar product data |
-| GET | `/v1/skyblock/bazaar/:itemId/history` | Bazaar price history |
-| GET | `/v1/skyblock/auctions/lowest/:item` | Lowest BIN for an item (by base name) |
-| GET | `/v1/skyblock/auctions/search?search=term` | Search auction items by name |
+| GET | `/v1/skyblock/profile/:profileUuid` | Raw Hypixel profile data |
+| GET | `/v1/skyblock/profiles/:playerUuid` | All profiles for a player |
+| GET | `/v1/skyblock/bazaar/:itemId` | Raw Hypixel bazaar product data |
+| GET | `/v1/skyblock/auctions/player/:playerUuid` | Player's active auctions |
+| GET | `/v1/skyblock/auctions/ended` | Recently ended auctions |
+| GET | `/v1/player/uuid/:username` | Username to UUID (Mojang API) |
+| GET | `/v1/player/username/:uuid` | UUID to username (Mojang API) |
+
+### v2 — Computed/Processed Data
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/v2/skyblock/profile/:profileUuid` | Processed profile (skills, networth, dungeons, slayers) |
+| GET | `/v2/skyblock/bazaar/:itemId` | Processed bazaar data (instant + average prices, top orders) |
+| GET | `/v2/skyblock/bazaar/:itemId/history` | Bazaar price history with summaries |
+| GET | `/v2/skyblock/auctions/lowest/:item` | Lowest BIN for an item (by base name) |
+| GET | `/v2/skyblock/auctions/search?search=term` | Search auction items by name |
 
 ### Real-Time Events
 

@@ -75,6 +75,7 @@ async function processBazaarJob(_job: Job): Promise<void> {
   const products = Object.entries(response.products);
   const snapshotRows: RawSnapshotRow[] = [];
   const cacheEntries: Array<{ id: string; data: BazaarProductData }> = [];
+  const rawCacheEntries: Array<{ id: string; data: Record<string, unknown> }> = [];
   const newSnapshot = new Map<string, BazaarProductData>();
   let alertsPublished = 0;
 
@@ -82,6 +83,7 @@ async function processBazaarJob(_job: Job): Promise<void> {
     const data = transformProduct(productId, product);
     newSnapshot.set(productId, data);
     cacheEntries.push({ id: productId, data });
+    rawCacheEntries.push({ id: productId, data: product as unknown as Record<string, unknown> });
 
     // Store raw Hypixel data in Postgres
     snapshotRows.push({
@@ -119,8 +121,9 @@ async function processBazaarJob(_job: Job): Promise<void> {
   // Update in-memory snapshot for next poll
   previousSnapshot = newSnapshot;
 
-  // Bulk write all products to warm cache in one Redis pipeline
+  // Bulk write processed + raw data to warm cache
   await cacheSetBulk('warm', 'bazaar', cacheEntries);
+  await cacheSetBulk('warm', 'bazaar-raw', rawCacheEntries);
 
   // Bulk insert raw snapshots into Postgres
   if (snapshotRows.length > 0) {

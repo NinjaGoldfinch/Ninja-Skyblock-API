@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import Fastify from 'fastify';
 import type { FastifyInstance } from 'fastify';
 import { authPlugin } from '../../../src/plugins/auth.js';
-import { bazaarRoute } from '../../../src/routes/v1/skyblock/bazaar.js';
+import { v2BazaarRoute } from '../../../src/routes/v2/skyblock/bazaar.js';
 import { cacheSet } from '../../../src/services/cache-manager.js';
 import { AppError } from '../../../src/utils/errors.js';
 import { registerSharedSchemas } from '../../../src/schemas/common.js';
@@ -31,7 +31,7 @@ beforeAll(async () => {
   app = Fastify();
   registerSharedSchemas(app);
   app.register(authPlugin);
-  app.register(bazaarRoute);
+  app.register(v2BazaarRoute);
 
   app.setErrorHandler((error, _request, reply) => {
     if (error instanceof AppError) {
@@ -66,11 +66,11 @@ afterAll(async () => {
   await app.close();
 });
 
-describe('GET /v1/skyblock/bazaar/:itemId', () => {
+describe('GET /v2/skyblock/bazaar/:itemId', () => {
   it('returns cached bazaar data in success envelope', async () => {
     const res = await app.inject({
       method: 'GET',
-      url: '/v1/skyblock/bazaar/TEST_ITEM',
+      url: '/v2/skyblock/bazaar/TEST_ITEM',
     });
     expect(res.statusCode).toBe(200);
     const body = res.json();
@@ -85,7 +85,7 @@ describe('GET /v1/skyblock/bazaar/:itemId', () => {
   it('returns error for uncached item', async () => {
     const res = await app.inject({
       method: 'GET',
-      url: '/v1/skyblock/bazaar/NONEXISTENT_ITEM',
+      url: '/v2/skyblock/bazaar/NONEXISTENT_ITEM',
     });
     expect(res.statusCode).toBe(400);
     const body = res.json();
@@ -94,11 +94,11 @@ describe('GET /v1/skyblock/bazaar/:itemId', () => {
   });
 });
 
-describe('GET /v1/skyblock/bazaar/:itemId/history', () => {
+describe('GET /v2/skyblock/bazaar/:itemId/history', () => {
   it('returns history structure with empty datapoints', async () => {
     const res = await app.inject({
       method: 'GET',
-      url: '/v1/skyblock/bazaar/TEST_ITEM/history?range=1h',
+      url: '/v2/skyblock/bazaar/TEST_ITEM/history?range=1h',
     });
     expect(res.statusCode).toBe(200);
     const body = res.json();
@@ -113,7 +113,7 @@ describe('GET /v1/skyblock/bazaar/:itemId/history', () => {
   it('defaults to 24h range', async () => {
     const res = await app.inject({
       method: 'GET',
-      url: '/v1/skyblock/bazaar/TEST_ITEM/history',
+      url: '/v2/skyblock/bazaar/TEST_ITEM/history',
     });
     const body = res.json();
     expect(body.data.range).toBe('24h');
