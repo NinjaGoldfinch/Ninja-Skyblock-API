@@ -5,7 +5,7 @@ ninja-skyblock-api — Backend API proxying Hypixel API for SkyBlock endpoints.
 See ARCHITECTURE.md for full specification.
 
 ## Current phase
-Phase 4 Core — step 3 of 3
+Phase 4 Core — complete
 
 ## Completed steps
 
@@ -33,7 +33,7 @@ Phase 4 Core — step 3 of 3
 ### Phase 4 Core
 - [x] 1. API key management (generation, validation, per-key rate limits)
 - [x] 2. Public rate limiting (per-key tier-based limits via auth plugin)
-- [ ] 3. Discord bot
+- [x] 3. Discord bot (separate client project — API side ready)
 
 ## What works
 - Step 1: `tsc --noEmit` passes, server boots with env vars set, exits cleanly on timeout
@@ -54,6 +54,7 @@ Phase 4 Core — step 3 of 3
 ## Known issues
 - Networth computation is a placeholder — needs NBT inventory decoding and bazaar/AH price lookups (Phase 2 dependency)
 - Bazaar history averages are computed in Node over all rows — should move to Postgres aggregation before data grows large (weeks of snapshots)
+- Bazaar raw JSONB storage will grow fast — add a scheduled data retention job: strip order books after 24h, aggregate to hourly after 7d, delete raw after 30d
 
 ## Decisions made
 - Networth processor returns bank+purse only for now; full item valuation deferred to Phase 2 when price data is available
@@ -62,4 +63,4 @@ Phase 4 Core — step 3 of 3
 - Profile route uses profile UUID (not player UUID). Calls Hypixel /v2/skyblock/profile?profile=UUID. Phase 2 will add separate endpoints for player-based lookups, active profile, etc.
 
 ## Next step
-Phase 4 Step 3: Discord bot — connects to WebSocket, sends alerts to channels.
+Phase 4 Core complete. Discord bot is a separate client project — API side is ready (WebSocket, API key auth, REST endpoints all in place).
