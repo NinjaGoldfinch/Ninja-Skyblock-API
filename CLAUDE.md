@@ -5,17 +5,25 @@ ninja-skyblock-api — Backend API proxying Hypixel API for SkyBlock endpoints.
 See ARCHITECTURE.md for full specification.
 
 ## Current phase
-Phase 1 Core — complete
+Phase 2 Core — step 1 of 4
 
 ## Completed steps
+
+### Phase 1 Core
 - [x] 1. Project scaffold (package.json, tsconfig, docker-compose, directory structure)
 - [x] 2. Environment variable parsing (src/config/env.ts)
 - [x] 3. Hypixel API client (src/services/hypixel-client.ts)
 - [x] 4. Cache manager (src/services/cache-manager.ts)
 - [x] 5. Rate limiter (src/services/rate-limiter.ts)
-- [x] 6. Profile route (GET /v1/skyblock/profile/:uuid) — end-to-end
+- [x] 6. Profile route (GET /v1/skyblock/profile/:profileUuid) — end-to-end
 - [x] 7. HMAC auth plugin (src/plugins/auth.ts)
 - [x] 8. Processors (networth, skills)
+
+### Phase 2 Core
+- [ ] 1. BullMQ queue setup
+- [ ] 2. Bazaar tracker worker
+- [ ] 3. PostgreSQL schema (migrations)
+- [ ] 4. Bazaar history endpoint
 
 ## What works
 - Step 1: `tsc --noEmit` passes, server boots with env vars set, exits cleanly on timeout
@@ -37,4 +45,4 @@ Phase 1 Core — complete
 - Profile route uses profile UUID (not player UUID). Calls Hypixel /v2/skyblock/profile?profile=UUID. Phase 2 will add separate endpoints for player-based lookups, active profile, etc.
 
 ## Next step
-Phase 1 Core complete. Next: Phase 1 "then" items (Pino logging, OpenAPI, remaining routes, tests).
+Phase 2 Step 2: Bazaar tracker worker — polls Hypixel, stores snapshots via PostgREST, updates warm cache.

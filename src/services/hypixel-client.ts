@@ -1,7 +1,7 @@
 import { env } from '../config/env.js';
 import { HYPIXEL_BASE_URL } from '../config/constants.js';
 import { errors } from '../utils/errors.js';
-import type { HypixelProfilesResponse, HypixelProfileResponse } from '../types/hypixel.js';
+import type { HypixelProfilesResponse, HypixelProfileResponse, HypixelBazaarResponse } from '../types/hypixel.js';
 
 interface HypixelRequestOptions {
   endpoint: string;
@@ -82,6 +82,12 @@ export async function fetchPlayerProfiles(playerUuid: string): Promise<HypixelPr
   return fetchHypixel<HypixelProfilesResponse>({
     endpoint: '/v2/skyblock/profiles',
     params: { uuid: playerUuid },
+  });
+}
+
+export async function fetchBazaar(): Promise<HypixelBazaarResponse> {
+  return fetchHypixel<HypixelBazaarResponse>({
+    endpoint: '/v2/skyblock/bazaar',
   });
 }
 

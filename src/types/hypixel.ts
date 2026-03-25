@@ -75,3 +75,23 @@ export interface HypixelProfileResponse {
   success: boolean;
   profile: HypixelSkyBlockProfile | null;
 }
+
+export interface HypixelBazaarProduct {
+  product_id: string;
+  quick_status: {
+    buyPrice: number;
+    buyVolume: number;
+    buyMovingWeek: number;
+    buyOrders: number;
+    sellPrice: number;
+    sellVolume: number;
+    sellMovingWeek: number;
+    sellOrders: number;
+  };
+}
+
+export interface HypixelBazaarResponse {
+  success: boolean;
+  lastUpdated: number;
+  products: Record<string, HypixelBazaarProduct>;
+}
