@@ -3,6 +3,7 @@ import { getQueue, createWorker } from '../utils/queue.js';
 import { fetchConditional } from '../services/hypixel-client.js';
 import { cacheSet } from '../services/cache-manager.js';
 import { postgrestInsert } from '../services/postgrest-client.js';
+import { contentHash } from '../utils/content-hash.js';
 import { createLogger } from '../utils/logger.js';
 import type { HypixelItemsResponse } from '../types/hypixel.js';
 
@@ -10,6 +11,7 @@ const log = createLogger('resource-items');
 const QUEUE_NAME = 'resource-items';
 
 let lastModifiedHeader: string | undefined;
+let lastContentHash: string | undefined;
 
 async function processJob(_job: Job): Promise<void> {
   const result = await fetchConditional<HypixelItemsResponse>(
@@ -36,23 +38,27 @@ async function processJob(_job: Job): Promise<void> {
   }
   await cacheSet('warm', 'resources', 'item-lookup', itemLookup, response.lastUpdated);
 
-  try {
-    await postgrestInsert('resource_snapshots', {
-      resource_type: 'items',
-      version: String(response.lastUpdated),
-      raw_data: response as unknown as Record<string, unknown>,
-    });
-  } catch (err) {
-    log.error({ err }, 'Failed to insert items snapshot');
+  const hash = contentHash(response.items);
+  if (hash !== lastContentHash) {
+    lastContentHash = hash;
+    try {
+      await postgrestInsert('resource_snapshots', {
+        resource_type: 'items',
+        version: String(response.lastUpdated),
+        raw_data: response as unknown as Record<string, unknown>,
+      });
+    } catch (err) {
+      log.error({ err }, 'Failed to insert items snapshot');
+    }
+    log.info({ item_count: response.items.length }, 'Items updated (new content)');
+  } else {
+    log.debug({ item_count: response.items.length }, 'Items fetched but content unchanged');
   }
-
-  log.info({ item_count: response.items.length }, 'Items updated');
 }
 
 export function startItemsTracker(): void {
   const queue = getQueue(QUEUE_NAME);
 
-  // Poll every 1s — conditional fetch skips when unchanged
   queue.upsertJobScheduler(
     'items-poll',
     { every: 1000 },
