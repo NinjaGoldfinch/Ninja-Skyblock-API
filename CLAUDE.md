@@ -9,7 +9,7 @@ Phase 1 Core — step 2 of 8
 
 ## Completed steps
 - [x] 1. Project scaffold (package.json, tsconfig, docker-compose, directory structure)
-- [ ] 2. Environment variable parsing (src/config/env.ts)
+- [x] 2. Environment variable parsing (src/config/env.ts)
 - [ ] 3. Hypixel API client (src/services/hypixel-client.ts)
 - [ ] 4. Cache manager (src/services/cache-manager.ts)
 - [ ] 5. Rate limiter (src/services/rate-limiter.ts)
@@ -19,6 +19,7 @@ Phase 1 Core — step 2 of 8
 
 ## What works
 - Step 1: `tsc --noEmit` passes, server boots with env vars set, exits cleanly on timeout
+- Step 2: env.ts parses all required/optional vars, exits on missing required vars
 
 ## Known issues
 <!-- Bugs, edge cases, things to revisit -->
@@ -27,4 +28,4 @@ Phase 1 Core — step 2 of 8
 <!-- Any implementation decisions that deviated from or clarified ARCHITECTURE.md -->
 
 ## Next step
-Step 2: Environment variable parsing — already created env.ts as part of scaffold, will be committed with step 1.
+Step 3: Hypixel API client with key rotation and retry logic.
