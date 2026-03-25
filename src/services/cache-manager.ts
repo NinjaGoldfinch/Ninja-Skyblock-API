@@ -37,7 +37,7 @@ export async function cacheGet<T>(tier: CacheTier, resource: string, id: string)
   const raw = await redis.get(key);
 
   if (!raw) {
-    log.debug({ key, hit: false }, 'Cache miss');
+    log.trace({ key, hit: false }, 'Cache miss');
     return null;
   }
 
@@ -46,7 +46,7 @@ export async function cacheGet<T>(tier: CacheTier, resource: string, id: string)
   const ttl = getTtl(tier);
   const stale = ageSeconds > ttl;
 
-  log.debug({ key, hit: true, age_seconds: ageSeconds, stale }, 'Cache hit');
+  log.trace({ key, hit: true, age_seconds: ageSeconds, stale }, 'Cache hit');
   return {
     data: entry.data,
     cached: true,

@@ -32,7 +32,7 @@ async function postgrestFetch<T>(path: string, init?: RequestInit): Promise<T> {
     throw errors.internal(new Error(`PostgREST error ${response.status}: ${body}`));
   }
 
-  log.debug({ path, method: init?.method ?? 'GET', duration_ms: durationMs }, 'PostgREST request completed');
+  log.trace({ path, method: init?.method ?? 'GET', duration_ms: durationMs }, 'PostgREST request completed');
 
   const text = await response.text();
   if (!text) return undefined as T;
