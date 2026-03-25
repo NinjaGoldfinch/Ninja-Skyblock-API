@@ -18,6 +18,7 @@ services:
       POSTGREST_URL: http://postgrest:3000
       HYPIXEL_API_KEY: ${HYPIXEL_API_KEY}
       HMAC_SECRET: ${HMAC_SECRET:-dev-secret-change-me}
+      DEV_AUTH_BYPASS: ${DEV_AUTH_BYPASS:-false}
       CLIENT_RATE_LIMIT: 60
       PUBLIC_RATE_LIMIT: 30
       HYPIXEL_RATE_LIMIT: 120
