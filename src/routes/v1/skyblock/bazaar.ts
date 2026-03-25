@@ -8,6 +8,62 @@ interface BazaarParams {
 }
 
 export async function bazaarRoute(app: FastifyInstance): Promise<void> {
+  // GET /v1/skyblock/bazaar — all raw bazaar data
+  app.get(
+    '/v1/skyblock/bazaar',
+    {
+      schema: {
+        tags: ['bazaar'],
+        summary: 'Get all raw bazaar data',
+        description: 'Returns raw Hypixel bazaar data for all products. Equivalent to the Hypixel /v2/skyblock/bazaar endpoint.',
+        response: {
+          200: {
+            type: 'object',
+            properties: {
+              success: { type: 'boolean', const: true },
+              data: { type: 'object', additionalProperties: true },
+              meta: { $ref: 'response-meta#' },
+            },
+          },
+          429: { $ref: 'error-response#' },
+        },
+      },
+    },
+    async (request: FastifyRequest) => {
+      await enforceClientRateLimit(request.clientId, request.clientRateLimit);
+
+      const redis = getRedis();
+      const products: Record<string, unknown> = {};
+      let oldestTimestamp = Date.now();
+
+      let cursor = '0';
+      do {
+        const [nextCursor, keys] = await redis.scan(cursor, 'MATCH', 'cache:warm:bazaar-raw:*', 'COUNT', 500);
+        cursor = nextCursor;
+
+        if (keys.length > 0) {
+          const values = await redis.mget(...keys);
+          for (let i = 0; i < keys.length; i++) {
+            const raw = values[i];
+            if (!raw) continue;
+            const entry = JSON.parse(raw) as { data: Record<string, unknown>; cached_at: number };
+            const itemId = keys[i]!.replace('cache:warm:bazaar-raw:', '');
+            products[itemId] = entry.data;
+            if (entry.cached_at < oldestTimestamp) oldestTimestamp = entry.cached_at;
+          }
+        }
+      } while (cursor !== '0');
+
+      const ageSeconds = Math.floor((Date.now() - oldestTimestamp) / 1000);
+
+      return {
+        success: true,
+        data: { products, count: Object.keys(products).length },
+        meta: { cached: true, cache_age_seconds: ageSeconds, timestamp: Date.now() },
+      };
+    },
+  );
+
   // GET /v1/skyblock/bazaar/:itemId — raw Hypixel bazaar data for a product
   app.get<{ Params: BazaarParams }>(
     '/v1/skyblock/bazaar/:itemId',
