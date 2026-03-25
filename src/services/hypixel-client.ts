@@ -11,17 +11,6 @@ interface HypixelRequestOptions {
 const MAX_RETRIES = 3;
 const RETRY_DELAY_MS = 1000;
 
-let currentKeyIndex = 0;
-
-function getNextApiKey(): string {
-  const key = env.HYPIXEL_API_KEYS[currentKeyIndex];
-  if (!key) {
-    throw errors.internal(new Error('No Hypixel API keys configured'));
-  }
-  currentKeyIndex = (currentKeyIndex + 1) % env.HYPIXEL_API_KEYS.length;
-  return key;
-}
-
 async function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -37,21 +26,19 @@ async function fetchHypixel<T>(options: HypixelRequestOptions): Promise<T> {
   let lastError: unknown;
 
   for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
-    const apiKey = getNextApiKey();
-
     const response = await fetch(url.toString(), {
       headers: {
-        'API-Key': apiKey,
+        'API-Key': env.HYPIXEL_API_KEY,
         'Accept': 'application/json',
       },
     });
 
     // 403 — invalid key, stop immediately
     if (response.status === 403) {
-      throw errors.hypixelError(new Error(`Hypixel API returned 403 Forbidden for key index ${currentKeyIndex}`));
+      throw errors.hypixelError(new Error('Hypixel API returned 403 Forbidden'));
     }
 
-    // 429 — rate limited, back off and retry with next key
+    // 429 — rate limited, back off and retry
     if (response.status === 429) {
       lastError = new Error('Hypixel API rate limited (429)');
       const retryAfter = response.headers.get('retry-after');

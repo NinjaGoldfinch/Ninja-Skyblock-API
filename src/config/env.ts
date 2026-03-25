@@ -20,7 +20,7 @@ export const env = {
   POSTGREST_URL:         requireEnv('POSTGREST_URL'),
 
   // Hypixel
-  HYPIXEL_API_KEYS:      requireEnv('HYPIXEL_API_KEYS').split(','),
+  HYPIXEL_API_KEY:       requireEnv('HYPIXEL_API_KEY'),
 
   // Auth
   HMAC_SECRET:           requireEnv('HMAC_SECRET'),

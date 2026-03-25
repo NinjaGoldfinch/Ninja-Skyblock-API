@@ -33,6 +33,7 @@ Phase 1 Core — complete
 ## Decisions made
 - Networth processor returns bank+purse only for now; full item valuation deferred to Phase 2 when price data is available
 - Sacks "value" in breakdown is item count, not coin value, until bazaar prices exist
+- Changed HYPIXEL_API_KEYS (plural, comma-split) to HYPIXEL_API_KEY (singular) — only one key per project
 
 ## Next step
 Phase 1 Core complete. Next: Phase 1 "then" items (Pino logging, OpenAPI, remaining routes, tests).

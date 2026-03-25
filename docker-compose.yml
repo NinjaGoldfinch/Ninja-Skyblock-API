@@ -16,7 +16,7 @@ services:
       LOG_LEVEL: debug
       REDIS_URL: redis://redis:6379
       POSTGREST_URL: http://postgrest:3000
-      HYPIXEL_API_KEYS: ${HYPIXEL_API_KEYS}
+      HYPIXEL_API_KEY: ${HYPIXEL_API_KEY}
       HMAC_SECRET: ${HMAC_SECRET:-dev-secret-change-me}
       CLIENT_RATE_LIMIT: 60
       PUBLIC_RATE_LIMIT: 30
