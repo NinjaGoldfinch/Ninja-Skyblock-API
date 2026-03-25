@@ -47,15 +47,25 @@ async function searchAuctionCache(searchTerm: string): Promise<LowestBinData | n
   return bestMatch?.data ?? null;
 }
 
+interface LowestQuery {
+  key_by?: 'name' | 'skyblock_id';
+}
+
 export async function v2AuctionsRoute(app: FastifyInstance): Promise<void> {
   // GET /v2/skyblock/auctions/lowest — all items with lowest BIN
-  app.get(
+  app.get<{ Querystring: LowestQuery }>(
     '/v2/skyblock/auctions/lowest',
     {
       schema: {
         tags: ['auctions'],
         summary: 'Get all lowest BIN prices',
-        description: 'Returns the lowest BIN listing for every item tracked by the auction scanner, sorted by base item name.',
+        description: 'Returns the lowest BIN listing for every item. Use `?key_by=skyblock_id` to get a map keyed by SkyBlock item ID (for mod consumption).',
+        querystring: {
+          type: 'object',
+          properties: {
+            key_by: { type: 'string', enum: ['name', 'skyblock_id'], default: 'name', description: 'Key the response by item name or skyblock_id.' },
+          },
+        },
         response: {
           200: {
             type: 'object',
@@ -69,28 +79,43 @@ export async function v2AuctionsRoute(app: FastifyInstance): Promise<void> {
         },
       },
     },
-    async (request: FastifyRequest) => {
+    async (request: FastifyRequest<{ Querystring: LowestQuery }>) => {
       await enforceClientRateLimit(request.clientId, request.clientRateLimit);
+      const keyBy = request.query.key_by ?? 'name';
 
-      const cached = await cacheGet<Record<string, LowestBinData>>('hot', 'auction-lowest-all', 'latest');
-      if (cached) {
-        const items = Object.values(cached.data)
-          .map((d) => ({
-            base_item: d.base_item,
-            lowest_price: d.lowest.price,
-            auction_id: d.lowest.auction_id,
-            item_name: d.lowest.item_name,
-            seller_uuid: d.lowest.seller_uuid,
-            tier: d.lowest.tier,
-            count: d.count,
-          }))
-          .sort((a, b) => a.base_item.localeCompare(b.base_item));
+      if (keyBy === 'skyblock_id') {
+        // Return keyed by skyblock_id — one GET, mod-friendly format
+        const cached = await cacheGet<Record<string, LowestBinData>>('hot', 'auction-lowest-all-by-id', 'latest');
+        if (cached) {
+          return {
+            success: true,
+            data: cached.data,
+            meta: { cached: true, cache_age_seconds: cached.cache_age_seconds, timestamp: Date.now() },
+          };
+        }
+      } else {
+        // Return as sorted array keyed by name
+        const cached = await cacheGet<Record<string, LowestBinData>>('hot', 'auction-lowest-all', 'latest');
+        if (cached) {
+          const items = Object.values(cached.data)
+            .map((d) => ({
+              skyblock_id: d.skyblock_id,
+              base_item: d.base_item,
+              lowest_price: d.lowest.price,
+              auction_id: d.lowest.auction_id,
+              item_name: d.lowest.item_name,
+              seller_uuid: d.lowest.seller_uuid,
+              tier: d.lowest.tier,
+              count: d.count,
+            }))
+            .sort((a, b) => a.base_item.localeCompare(b.base_item));
 
-        return {
-          success: true,
-          data: { items, count: items.length },
-          meta: { cached: true, cache_age_seconds: cached.cache_age_seconds, timestamp: Date.now() },
-        };
+          return {
+            success: true,
+            data: { items, count: items.length },
+            meta: { cached: true, cache_age_seconds: cached.cache_age_seconds, timestamp: Date.now() },
+          };
+        }
       }
 
       throw errors.validation('No auction data available yet. The auction scanner may not have run.');
@@ -104,12 +129,12 @@ export async function v2AuctionsRoute(app: FastifyInstance): Promise<void> {
       schema: {
         tags: ['auctions'],
         summary: 'Get lowest BIN price',
-        description: 'Returns the lowest BIN listing for an item by base name (e.g. "Hyperion", "Aspect of the End"). Searches across all reforge/star variants and returns the cheapest.',
+        description: 'Returns the lowest BIN listing for an item. Accepts base item name (e.g. "Hyperion") or SkyBlock item ID (e.g. "HYPERION"). Falls back to search if no exact match.',
         params: {
           type: 'object',
           required: ['item'],
           properties: {
-            item: { type: 'string', description: 'Base item name (without reforges/stars).' },
+            item: { type: 'string', description: 'Base item name or SkyBlock item ID.' },
           },
         },
         response: {
@@ -130,13 +155,23 @@ export async function v2AuctionsRoute(app: FastifyInstance): Promise<void> {
       const { item } = request.params;
       await enforceClientRateLimit(request.clientId, request.clientRateLimit);
 
-      // Try exact match first
+      // Try exact match by base item name
       const cached = await cacheGet<LowestBinData>('hot', 'auction-lowest', item);
       if (cached) {
         return {
           success: true,
           data: cached.data,
           meta: { cached: true, cache_age_seconds: cached.cache_age_seconds, timestamp: Date.now() },
+        };
+      }
+
+      // Try by skyblock_id (e.g. HYPERION, ASPECT_OF_THE_END)
+      const byId = await cacheGet<LowestBinData>('hot', 'auction-lowest-id', item.toUpperCase());
+      if (byId) {
+        return {
+          success: true,
+          data: byId.data,
+          meta: { cached: true, cache_age_seconds: byId.cache_age_seconds, timestamp: Date.now() },
         };
       }
 

@@ -26,6 +26,7 @@ export interface AuctionItemData {
 }
 
 export interface LowestBinData {
+  skyblock_id: string | null;
   base_item: string;
   lowest: AuctionItemData;
   listings: AuctionItemData[];
@@ -92,11 +93,13 @@ let previousLowestBins = new Map<string, LowestBinData>();
 async function processAuctionJob(_job: Job): Promise<void> {
   const startTime = Date.now();
 
-  // Refresh known item names from cache (updated by items worker)
+  // Refresh known item names and name→id lookup from cache (updated by items worker)
   const itemNamesCache = await cacheGet<string[]>('warm', 'resources', 'item-known-names');
   if (itemNamesCache) {
     knownItemNames = new Set(itemNamesCache.data);
   }
+  const nameToIdCache = await cacheGet<Record<string, string>>('warm', 'resources', 'item-name-to-id');
+  const nameToId = nameToIdCache?.data ?? {};
 
   // Conditional fetch on page 0 — check if data has changed
   const checkResult = await fetchConditional<HypixelAuctionsPageResponse>(
@@ -208,6 +211,7 @@ async function processAuctionJob(_job: Job): Promise<void> {
     listings.sort((a, b) => a.price - b.price);
     const lowest = listings[0]!;
     lowestBins.set(baseItem, {
+      skyblock_id: nameToId[baseItem] ?? null,
       base_item: baseItem,
       lowest,
       listings: listings.slice(0, 20), // Top 20 cheapest
@@ -250,12 +254,38 @@ async function processAuctionJob(_job: Job): Promise<void> {
     id: baseItem,
     data,
   }));
+
+  // Also cache keyed by skyblock_id for mod lookups
+  const skyblockIdEntries: Array<{ id: string; data: LowestBinData }> = [];
+  let unmatchedCount = 0;
+  for (const data of lowestBins.values()) {
+    if (data.skyblock_id) {
+      skyblockIdEntries.push({ id: data.skyblock_id, data });
+    } else {
+      unmatchedCount++;
+    }
+  }
+
   if (cacheEntries.length > 0) {
     await cacheSetBulk('hot', 'auction-lowest', cacheEntries, firstPage.lastUpdated);
+    await cacheSetBulk('hot', 'auction-lowest-id', skyblockIdEntries, firstPage.lastUpdated);
 
-    // Store all lowest BINs as single key for bulk reads
+    // Store all lowest BINs as single key for bulk reads (keyed by base_item name)
     const allLowest = Object.fromEntries(lowestBins);
     await cacheSet('hot', 'auction-lowest-all', 'latest', allLowest, firstPage.lastUpdated);
+
+    // Store keyed by skyblock_id for mod consumption
+    const allById: Record<string, LowestBinData> = {};
+    for (const data of lowestBins.values()) {
+      if (data.skyblock_id) {
+        allById[data.skyblock_id] = data;
+      }
+    }
+    await cacheSet('hot', 'auction-lowest-all-by-id', 'latest', allById, firstPage.lastUpdated);
+  }
+
+  if (unmatchedCount > 0) {
+    log.debug({ unmatched_items: unmatchedCount }, 'Auction items without skyblock_id');
   }
 
   previousLowestBins = lowestBins;
