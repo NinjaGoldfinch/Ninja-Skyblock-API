@@ -75,7 +75,15 @@ export async function v2AuctionsRoute(app: FastifyInstance): Promise<void> {
       const cached = await cacheGet<Record<string, LowestBinData>>('hot', 'auction-lowest-all', 'latest');
       if (cached) {
         const items = Object.values(cached.data)
-          .map((d) => ({ base_item: d.base_item, lowest_price: d.lowest.price, count: d.count }))
+          .map((d) => ({
+            base_item: d.base_item,
+            lowest_price: d.lowest.price,
+            auction_id: d.lowest.auction_id,
+            item_name: d.lowest.item_name,
+            seller_uuid: d.lowest.seller_uuid,
+            tier: d.lowest.tier,
+            count: d.count,
+          }))
           .sort((a, b) => a.base_item.localeCompare(b.base_item));
 
         return {
