@@ -1,7 +1,7 @@
 import type { Job } from 'bullmq';
 import { getQueue, createWorker } from '../utils/queue.js';
 import { fetchAuctionsPage, fetchConditional } from '../services/hypixel-client.js';
-import { cacheSetBulk } from '../services/cache-manager.js';
+import { cacheSet, cacheSetBulk } from '../services/cache-manager.js';
 import { publish } from '../services/event-bus.js';
 import { createLogger } from '../utils/logger.js';
 import type { HypixelAuction, HypixelAuctionsPageResponse } from '../types/hypixel.js';
@@ -241,6 +241,10 @@ async function processAuctionJob(_job: Job): Promise<void> {
   }));
   if (cacheEntries.length > 0) {
     await cacheSetBulk('hot', 'auction-lowest', cacheEntries, firstPage.lastUpdated);
+
+    // Store all lowest BINs as single key for bulk reads
+    const allLowest = Object.fromEntries(lowestBins);
+    await cacheSet('hot', 'auction-lowest-all', 'latest', allLowest, firstPage.lastUpdated);
   }
 
   previousLowestBins = lowestBins;

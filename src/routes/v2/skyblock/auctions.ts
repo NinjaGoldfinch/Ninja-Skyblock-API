@@ -72,36 +72,20 @@ export async function v2AuctionsRoute(app: FastifyInstance): Promise<void> {
     async (request: FastifyRequest) => {
       await enforceClientRateLimit(request.clientId, request.clientRateLimit);
 
-      const redis = getRedis();
-      const items: Array<{ base_item: string; lowest_price: number; count: number }> = [];
+      const cached = await cacheGet<Record<string, LowestBinData>>('hot', 'auction-lowest-all', 'latest');
+      if (cached) {
+        const items = Object.values(cached.data)
+          .map((d) => ({ base_item: d.base_item, lowest_price: d.lowest.price, count: d.count }))
+          .sort((a, b) => a.base_item.localeCompare(b.base_item));
 
-      let cursor = '0';
-      do {
-        const [nextCursor, keys] = await redis.scan(cursor, 'MATCH', 'cache:hot:auction-lowest:*', 'COUNT', 500);
-        cursor = nextCursor;
+        return {
+          success: true,
+          data: { items, count: items.length },
+          meta: { cached: true, cache_age_seconds: cached.cache_age_seconds, timestamp: Date.now() },
+        };
+      }
 
-        if (keys.length > 0) {
-          const values = await redis.mget(...keys);
-          for (let i = 0; i < keys.length; i++) {
-            const raw = values[i];
-            if (!raw) continue;
-            const entry = JSON.parse(raw) as { data: LowestBinData; cached_at: number };
-            items.push({
-              base_item: entry.data.base_item,
-              lowest_price: entry.data.lowest.price,
-              count: entry.data.count,
-            });
-          }
-        }
-      } while (cursor !== '0');
-
-      items.sort((a, b) => a.base_item.localeCompare(b.base_item));
-
-      return {
-        success: true,
-        data: { items, count: items.length },
-        meta: { cached: true, cache_age_seconds: null, timestamp: Date.now() },
-      };
+      throw errors.validation('No auction data available yet. The auction scanner may not have run.');
     },
   );
 
