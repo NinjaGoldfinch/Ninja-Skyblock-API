@@ -104,13 +104,13 @@ export async function profileRoute(app: FastifyInstance): Promise<void> {
           type: 'object',
           required: ['profileUuid'],
           properties: {
-            profileUuid: { type: 'string', pattern: '^[a-f0-9]{32}$' },
+            profileUuid: { type: 'string', pattern: '^[a-f0-9]{8}-?[a-f0-9]{4}-?[a-f0-9]{4}-?[a-f0-9]{4}-?[a-f0-9]{12}$' },
           },
         },
       },
     },
     async (request: FastifyRequest<{ Params: ProfileParams }>, reply) => {
-      const { profileUuid } = request.params;
+      const profileUuid = request.params.profileUuid.replaceAll('-', '');
 
       await enforceClientRateLimit(request.clientId);
 
