@@ -93,11 +93,14 @@ let previousLowestBins = new Map<string, LowestBinData>();
 async function processAuctionJob(_job: Job): Promise<void> {
   const startTime = Date.now();
 
-  // Refresh known item names and name→id lookup from cache (updated by items worker)
+  // Wait for items worker to populate known item names before processing
   const itemNamesCache = await cacheGet<string[]>('warm', 'resources', 'item-known-names');
-  if (itemNamesCache) {
-    knownItemNames = new Set(itemNamesCache.data);
+  if (!itemNamesCache) {
+    log.info('Waiting for items worker to cache item names — skipping this cycle');
+    return;
   }
+  knownItemNames = new Set(itemNamesCache.data);
+
   const nameToIdCache = await cacheGet<Record<string, string>>('warm', 'resources', 'item-name-to-id');
   const nameToId = nameToIdCache?.data ?? {};
 
