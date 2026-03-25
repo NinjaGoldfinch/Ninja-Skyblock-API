@@ -75,6 +75,8 @@ All phases complete. Remaining: bazaar data retention (deferred), additional rou
 - [NOTE] Hypixel /v2/skyblock/auctions is a cached public endpoint — does not count against API key rate limit
 - Bazaar history averages are computed in Node over all rows — should move to Postgres aggregation before data grows large (weeks of snapshots)
 - Bazaar raw JSONB storage will grow fast — add a scheduled data retention job: strip order books after 24h, aggregate to hourly after 7d, delete raw after 30d
+- Auction scanner uses string stripping for base item names — fragile to new reforges/formatting. Better approach: maintain a display-name-to-item-ID lookup table from NEU repo or similar source. Fast lookup, no NBT parsing needed, just periodic updates when Hypixel adds items.
+- Further auction optimization: cache auction_id → item_id mapping in Redis so only new auctions need processing each scan cycle (most auctions persist for hours)
 - [RESOLVED] Watched players now manageable via API (GET/POST/DELETE /v1/admin/watched-players)
 - [RESOLVED] Auction lowest BIN now exposed via GET /v1/skyblock/auctions/lowest/:item
 
