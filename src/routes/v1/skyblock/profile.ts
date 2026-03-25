@@ -3,6 +3,9 @@ import { fetchPlayerProfiles } from '../../../services/hypixel-client.js';
 import { cacheGet, cacheSet } from '../../../services/cache-manager.js';
 import { enforceClientRateLimit } from '../../../services/rate-limiter.js';
 import { errors } from '../../../utils/errors.js';
+import { computeSkills } from '../../../processors/skills.js';
+import { computeNetworth } from '../../../processors/networth.js';
+import { SLAYER_XP_THRESHOLDS, DUNGEON_XP_THRESHOLDS } from '../../../config/constants.js';
 import type { SkyBlockProfile } from '../../../types/skyblock.js';
 import type { HypixelProfilesResponse, HypixelProfileMember } from '../../../types/hypixel.js';
 
@@ -10,12 +13,29 @@ interface ProfileParams {
   uuid: string;
 }
 
+function computeSlayerLevel(xp: number, thresholds: readonly number[]): number {
+  let level = 0;
+  for (let i = 1; i < thresholds.length; i++) {
+    if (thresholds[i] === undefined || xp < (thresholds[i] as number)) break;
+    level = i;
+  }
+  return level;
+}
+
+function computeDungeonLevel(xp: number): number {
+  let level = 0;
+  for (let i = 1; i < DUNGEON_XP_THRESHOLDS.length; i++) {
+    if (DUNGEON_XP_THRESHOLDS[i] === undefined || xp < (DUNGEON_XP_THRESHOLDS[i] as number)) break;
+    level = i;
+  }
+  return level;
+}
+
 function extractProfile(response: HypixelProfilesResponse, uuid: string): SkyBlockProfile {
   if (!response.profiles || response.profiles.length === 0) {
     throw errors.profileNotFound(uuid);
   }
 
-  // Find selected profile, or fall back to first
   const profile = response.profiles.find((p) => p.selected) ?? response.profiles[0];
   if (!profile) {
     throw errors.profileNotFound(uuid);
@@ -26,34 +46,33 @@ function extractProfile(response: HypixelProfilesResponse, uuid: string): SkyBlo
     throw errors.profileNotFound(uuid);
   }
 
-  // Extract skills from player_data.experience
-  const skills: Record<string, { level: number; xp: number; progress: number }> = {};
-  const experience = member.player_data?.experience ?? {};
-  for (const [apiKey, xp] of Object.entries(experience)) {
-    const skillName = apiKey.replace('SKILL_', '').toLowerCase();
-    skills[skillName] = { level: 0, xp: xp ?? 0, progress: 0 };
-  }
-
-  // Compute skill average
-  const skillValues = Object.values(skills);
-  const skillAverage = skillValues.length > 0
-    ? Math.round((skillValues.reduce((sum, s) => sum + s.level, 0) / skillValues.length) * 100) / 100
-    : 0;
+  // Use processors for skills and networth
+  const skillData = computeSkills(uuid, member);
+  const networthData = computeNetworth(uuid, member, profile);
 
   // Extract dungeons
   const dungeonData = member.dungeons;
+  const catacombsXp = dungeonData?.dungeon_types?.catacombs?.experience ?? 0;
   const dungeons = {
-    catacombs_level: 0,
+    catacombs_level: computeDungeonLevel(catacombsXp),
     secrets_found: dungeonData?.secrets ?? 0,
     selected_class: dungeonData?.selected_dungeon_class ?? 'none',
-    class_levels: { healer: 0, mage: 0, berserk: 0, archer: 0, tank: 0 },
+    class_levels: {
+      healer: computeDungeonLevel(dungeonData?.player_classes?.['healer']?.experience ?? 0),
+      mage: computeDungeonLevel(dungeonData?.player_classes?.['mage']?.experience ?? 0),
+      berserk: computeDungeonLevel(dungeonData?.player_classes?.['berserk']?.experience ?? 0),
+      archer: computeDungeonLevel(dungeonData?.player_classes?.['archer']?.experience ?? 0),
+      tank: computeDungeonLevel(dungeonData?.player_classes?.['tank']?.experience ?? 0),
+    },
   };
 
   // Extract slayers
   const slayers: Record<string, { level: number; xp: number }> = {};
   if (member.slayer_bosses) {
     for (const [boss, data] of Object.entries(member.slayer_bosses)) {
-      slayers[boss] = { level: 0, xp: data.xp ?? 0 };
+      const xp = data.xp ?? 0;
+      const thresholds = SLAYER_XP_THRESHOLDS[boss] ?? SLAYER_XP_THRESHOLDS['zombie'] ?? [];
+      slayers[boss] = { level: computeSlayerLevel(xp, thresholds), xp };
     }
   }
 
@@ -64,11 +83,11 @@ function extractProfile(response: HypixelProfilesResponse, uuid: string): SkyBlo
     profile_id: profile.profile_id,
     cute_name: profile.cute_name,
     selected: profile.selected,
-    skills,
-    skill_average: skillAverage,
+    skills: skillData.skills,
+    skill_average: skillData.skill_average,
     networth: {
-      total: 0,
-      breakdown: { inventory: 0, bank: bankBalance, sacks: 0, enderchest: 0, wardrobe: 0, pets: 0, accessories: 0 },
+      total: networthData.total,
+      breakdown: networthData.breakdown,
     },
     dungeons,
     slayers,
