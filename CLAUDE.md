@@ -5,7 +5,7 @@ ninja-skyblock-api — Backend API proxying Hypixel API for SkyBlock endpoints.
 See ARCHITECTURE.md for full specification.
 
 ## Current phase
-Phase 4 Core — complete
+All phases complete. Remaining: bazaar data retention (deferred), additional routes (dungeons, slayers, collections).
 
 ## Completed steps
 
@@ -40,6 +40,19 @@ Phase 4 Core — complete
 - [x] Profile tracker worker (watched players, skill diff, snapshot storage)
 - [x] Postgres aggregation functions (hourly bazaar averages, skill history)
 
+### Phase 1 "then"
+- [x] Pino structured logging across all services
+- [x] OpenAPI 3.1 spec + ReDoc documentation UI
+- [x] Vitest tests (42 passing — processors, services, routes)
+- [x] Error handling refinement
+
+### Phase 3 "then"
+- [x] WebSocket subscription matching (item_ids filter, price thresholds with operators)
+
+### Additional
+- [x] Watched players API (GET/POST/DELETE /v1/admin/watched-players)
+- [x] Auction lowest BIN endpoint (GET /v1/skyblock/auctions/lowest/:item)
+
 ## What works
 - Step 1: `tsc --noEmit` passes, server boots with env vars set, exits cleanly on timeout
 - Step 2: env.ts parses all required/optional vars, exits on missing required vars
@@ -72,4 +85,9 @@ Phase 4 Core — complete
 - Profile route uses profile UUID (not player UUID). Calls Hypixel /v2/skyblock/profile?profile=UUID. Phase 2 will add separate endpoints for player-based lookups, active profile, etc.
 
 ## Next step
-Phase 4 Core complete. Discord bot is a separate client project — API side is ready (WebSocket, API key auth, REST endpoints all in place).
+All core phases and "then" items complete. Remaining work:
+- Bazaar data retention job (deferred — storage strategy TBD)
+- Move bazaar history aggregation from Node to Postgres
+- Additional routes (dungeons, slayers, collections)
+- Full networth computation (NBT decoding + price lookups)
+- Discord bot (separate client project)
