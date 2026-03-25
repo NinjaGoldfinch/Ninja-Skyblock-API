@@ -14,14 +14,28 @@ export async function adminKeysRoute(app: FastifyInstance): Promise<void> {
     '/v1/admin/keys',
     {
       schema: {
+        tags: ['admin'],
+        summary: 'Generate API key',
+        description: 'Creates a new API key for a consumer. Requires internal (HMAC) authentication. The raw key is returned once and cannot be retrieved again.',
         body: {
           type: 'object',
           required: ['owner'],
           properties: {
-            owner: { type: 'string' },
-            tier: { type: 'string', enum: ['public', 'internal', 'bot'], default: 'public' },
-            rate_limit: { type: 'integer', minimum: 1, maximum: 1000, default: 30 },
+            owner: { type: 'string', description: 'Name or identifier of the key owner.' },
+            tier: { type: 'string', enum: ['public', 'internal', 'bot'], default: 'public', description: 'Rate limit tier.' },
+            rate_limit: { type: 'integer', minimum: 1, maximum: 1000, default: 30, description: 'Requests per minute.' },
           },
+        },
+        response: {
+          200: {
+            type: 'object',
+            properties: {
+              success: { type: 'boolean', const: true },
+              data: { type: 'object', description: 'Generated API key details.' },
+              meta: { $ref: 'response-meta#' },
+            },
+          },
+          403: { $ref: 'error-response#' },
         },
       },
     },

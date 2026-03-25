@@ -12,6 +12,10 @@ import { sseRoute } from './routes/v1/events/stream.js';
 import { adminKeysRoute } from './routes/v1/admin/keys.js';
 import { setupWebSocket } from './routes/v1/events/subscribe.js';
 import { closeEventBus } from './services/event-bus.js';
+import { swaggerPlugin } from './plugins/swagger.js';
+import { registerSharedSchemas } from './schemas/common.js';
+import { specRoute } from './routes/v1/docs/spec.js';
+import { redocRoute } from './routes/v1/docs/redoc.js';
 
 const app = Fastify({
   logger: {
@@ -51,6 +55,10 @@ app.setErrorHandler((error, _request, reply) => {
   });
 });
 
+// OpenAPI + shared schemas
+app.register(swaggerPlugin);
+registerSharedSchemas(app);
+
 // Auth
 app.register(authPlugin);
 
@@ -60,8 +68,33 @@ app.register(bazaarRoute);
 app.register(sseRoute);
 app.register(adminKeysRoute);
 
+// Docs
+app.register(specRoute);
+app.register(redocRoute);
+
 // Health check
-app.get('/v1/health', async () => {
+app.get('/v1/health', {
+  schema: {
+    tags: ['health'],
+    summary: 'Service health check',
+    description: 'Returns service status. No authentication required.',
+    response: {
+      200: {
+        type: 'object',
+        properties: {
+          success: { type: 'boolean', const: true },
+          data: {
+            type: 'object',
+            properties: {
+              status: { type: 'string', description: 'Service status.' },
+            },
+          },
+          meta: { $ref: 'response-meta#' },
+        },
+      },
+    },
+  },
+}, async () => {
   return { success: true, data: { status: 'ok' }, meta: { cached: false, cache_age_seconds: null, timestamp: Date.now() } };
 });
 

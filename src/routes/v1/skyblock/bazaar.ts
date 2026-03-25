@@ -42,12 +42,27 @@ export async function bazaarRoute(app: FastifyInstance): Promise<void> {
     '/v1/skyblock/bazaar/:itemId',
     {
       schema: {
+        tags: ['bazaar'],
+        summary: 'Get bazaar product data',
+        description: 'Returns current buy/sell prices (instant and average), volume, and top orders for a bazaar product.',
         params: {
           type: 'object',
           required: ['itemId'],
           properties: {
-            itemId: { type: 'string' },
+            itemId: { type: 'string', description: 'Hypixel item ID in SCREAMING_SNAKE_CASE.' },
           },
+        },
+        response: {
+          200: {
+            type: 'object',
+            properties: {
+              success: { type: 'boolean', const: true },
+              data: { type: 'object', description: 'Bazaar product data with instant and average prices.' },
+              meta: { $ref: 'response-meta#' },
+            },
+          },
+          400: { $ref: 'error-response#' },
+          429: { $ref: 'error-response#' },
         },
       },
     },
@@ -73,18 +88,32 @@ export async function bazaarRoute(app: FastifyInstance): Promise<void> {
     '/v1/skyblock/bazaar/:itemId/history',
     {
       schema: {
+        tags: ['bazaar'],
+        summary: 'Get bazaar price history',
+        description: 'Returns historical price snapshots for a bazaar product computed from raw Hypixel data.\n\nIncludes both instant prices (from order book) and weighted averages, plus a summary with period averages.',
         params: {
           type: 'object',
           required: ['itemId'],
           properties: {
-            itemId: { type: 'string' },
+            itemId: { type: 'string', description: 'Hypixel item ID in SCREAMING_SNAKE_CASE.' },
           },
         },
         querystring: {
           type: 'object',
           properties: {
-            range: { type: 'string', enum: ['1h', '6h', '24h', '7d', '30d'], default: '24h' },
+            range: { type: 'string', enum: ['1h', '6h', '24h', '7d', '30d'], default: '24h', description: 'Time range for history.' },
           },
+        },
+        response: {
+          200: {
+            type: 'object',
+            properties: {
+              success: { type: 'boolean', const: true },
+              data: { type: 'object', description: 'Price history with datapoints and period summary.' },
+              meta: { $ref: 'response-meta#' },
+            },
+          },
+          429: { $ref: 'error-response#' },
         },
       },
     },

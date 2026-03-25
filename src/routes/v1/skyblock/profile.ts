@@ -100,12 +100,31 @@ export async function profileRoute(app: FastifyInstance): Promise<void> {
     '/v1/skyblock/profile/:profileUuid',
     {
       schema: {
+        tags: ['skyblock'],
+        summary: 'Get SkyBlock profile',
+        description: 'Returns a SkyBlock profile by profile UUID, including skills, slayers, dungeon stats, and bank balance.\n\n**Caching:** Responses are cached for 60 seconds with stale-while-revalidate.',
         params: {
           type: 'object',
           required: ['profileUuid'],
           properties: {
-            profileUuid: { type: 'string', pattern: '^[a-f0-9]{8}-?[a-f0-9]{4}-?[a-f0-9]{4}-?[a-f0-9]{4}-?[a-f0-9]{12}$' },
+            profileUuid: {
+              type: 'string',
+              pattern: '^[a-f0-9]{8}-?[a-f0-9]{4}-?[a-f0-9]{4}-?[a-f0-9]{4}-?[a-f0-9]{12}$',
+              description: 'SkyBlock profile UUID (with or without hyphens).',
+            },
           },
+        },
+        response: {
+          200: {
+            type: 'object',
+            properties: {
+              success: { type: 'boolean', const: true },
+              data: { type: 'object', description: 'Processed SkyBlock profile data.' },
+              meta: { $ref: 'response-meta#' },
+            },
+          },
+          404: { $ref: 'error-response#' },
+          429: { $ref: 'error-response#' },
         },
       },
     },
