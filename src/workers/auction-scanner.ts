@@ -10,7 +10,7 @@ import type { HypixelAuction, HypixelAuctionsPageResponse, HypixelEndedAuctionsR
 const log = createLogger('auction-scanner');
 
 const ENDING_SOON_WINDOW_MS = 120_000;   // 2 minutes
-const PENDING_TIMEOUT_MS = 600_000;      // 10 minutes — generous timeout before marking expired
+const PENDING_TIMEOUT_MS = 1_800_000;    // 30 minutes — generous timeout before marking expired
 
 // --- Types ---
 

@@ -6,8 +6,8 @@ x-worker-common: &worker-common
     postgrest:
       condition: service_started
   environment: &worker-env
-    NODE_ENV: development
-    LOG_LEVEL: debug
+    NODE_ENV: ${NODE_ENV:-development}
+    LOG_LEVEL: ${LOG_LEVEL:-info}
     REDIS_URL: redis://redis:6379
     POSTGREST_URL: http://postgrest:3000
     HYPIXEL_API_KEY: ${HYPIXEL_API_KEY}
@@ -30,9 +30,9 @@ services:
       postgrest:
         condition: service_started
     environment:
-      PORT: 3000
-      NODE_ENV: development
-      LOG_LEVEL: debug
+      PORT: ${PORT:-3000}
+      NODE_ENV: ${NODE_ENV:-development}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
       REDIS_URL: redis://redis:6379
       POSTGREST_URL: http://postgrest:3000
       HYPIXEL_API_KEY: ${HYPIXEL_API_KEY}
