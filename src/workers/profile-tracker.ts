@@ -151,12 +151,10 @@ async function processProfileJob(_job: Job): Promise<void> {
     }
   }
 
-  log.info({
-    watched_players: watchedPlayers.length,
-    profiles_updated: profilesUpdated,
-    changes_detected: changesDetected,
-    duration_ms: Date.now() - startTime,
-  }, 'Profile poll complete');
+  const durationMs = Date.now() - startTime;
+  if (profilesUpdated > 0 || changesDetected > 0) {
+    log.info(`Profiles | watched:${watchedPlayers.length} updated:${profilesUpdated} changes:${changesDetected} | ${durationMs}ms`);
+  }
 }
 
 export function startProfileTracker(): void {

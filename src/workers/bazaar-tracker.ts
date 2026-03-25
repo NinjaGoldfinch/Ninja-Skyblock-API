@@ -153,11 +153,8 @@ async function processBazaarJob(_job: Job): Promise<void> {
     }
   }
 
-  log.info({
-    products_updated: products.length,
-    alerts_published: alertsPublished,
-    duration_ms: Date.now() - startTime,
-  }, 'Bazaar poll complete');
+  const durationMs = Date.now() - startTime;
+  log.info(`Bazaar | products:${products.length} alerts:${alertsPublished} | ${durationMs}ms`);
 }
 
 export function startBazaarTracker(): void {

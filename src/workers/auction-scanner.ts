@@ -279,7 +279,7 @@ async function processActiveAuctions(_job: Job): Promise<void> {
     // Even if active unchanged, still check ended
     const { soldCount, expiredCount } = await processEndedAuctions();
     if (soldCount > 0 || expiredCount > 0) {
-      log.info({ sold: soldCount, expired: expiredCount, pending: pendingAuctions.size }, 'Auction lifecycle update (active unchanged)');
+      log.info(`Auctions | sold:${soldCount} expired:${expiredCount} pending:${pendingAuctions.size}`);
     }
     return;
   }
@@ -427,7 +427,15 @@ async function processActiveAuctions(_job: Job): Promise<void> {
 
   previousLowestBins = lowestBins;
 
-  log.info({
+  const durationMs = Date.now() - startTime;
+
+  // Compact info line — just the changes that matter
+  log.info(
+    `Auctions | +${addedCount} -${removedCount} ~${updatedCount} | sold:${soldCount} expired:${expiredCount} | tracked:${allTracked.size} (bin:${binAuctions.size} reg:${regularAuctions.size}) pending:${pendingAuctions.size} | items:${lowestBins.size} alerts:${alertsPublished} | ${durationMs}ms`,
+  );
+
+  // Full details behind debug
+  log.debug({
     total_api: firstPage.totalAuctions,
     tracked: allTracked.size,
     bin: binAuctions.size,
@@ -445,8 +453,8 @@ async function processActiveAuctions(_job: Job): Promise<void> {
     unique_items: lowestBins.size,
     ending_soon: endingSoon.length,
     alerts_published: alertsPublished,
-    duration_ms: Date.now() - startTime,
-  }, 'Auction scan complete');
+    duration_ms: durationMs,
+  }, 'Auction scan details');
 }
 
 // --- Startup ---
