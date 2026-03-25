@@ -2,6 +2,7 @@ import Fastify from 'fastify';
 import { env } from './config/env.js';
 import { AppError } from './utils/errors.js';
 import { closeRedis } from './utils/redis.js';
+import { profileRoute } from './routes/v1/skyblock/profile.js';
 
 const app = Fastify();
 
@@ -32,6 +33,9 @@ app.setErrorHandler((error, _request, reply) => {
     meta: { timestamp: Date.now() },
   });
 });
+
+// Routes
+app.register(profileRoute);
 
 // Health check
 app.get('/v1/health', async () => {
