@@ -125,18 +125,23 @@ async function processAuctionJob(_job: Job): Promise<void> {
   // Process page 0 (already fetched)
   processPage(firstPage.auctions);
 
-  // Fetch all remaining pages in parallel
+  // Fetch all remaining pages in parallel (all at once)
+  const parallelCount = firstPage.totalPages - 1;
+  const fetchStart = Date.now();
   const pagePromises = Array.from(
-    { length: firstPage.totalPages - 1 },
+    { length: parallelCount },
     (_, i) => fetchAuctionsPage(i + 1).catch((err) => {
       log.warn({ page: i + 1, err }, 'Failed to fetch auction page');
       return null;
     }),
   );
   const pages = await Promise.all(pagePromises);
+  const fetchDuration = Date.now() - fetchStart;
+  let pagesSucceeded = 0;
   for (const pageData of pages) {
     if (pageData?.success) {
       processPage(pageData.auctions);
+      pagesSucceeded++;
     }
   }
 
@@ -219,6 +224,9 @@ async function processAuctionJob(_job: Job): Promise<void> {
   log.info({
     total_auctions: firstPage.totalAuctions,
     pages: firstPage.totalPages,
+    pages_parallel: parallelCount,
+    pages_succeeded: pagesSucceeded + 1, // +1 for page 0
+    fetch_duration_ms: fetchDuration,
     bin_auctions: allBinAuctions.length,
     unique_items: lowestBins.size,
     ending_soon: endingSoon.length,
