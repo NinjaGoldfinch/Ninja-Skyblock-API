@@ -499,9 +499,6 @@ async function processActiveAuctions(_job: Job): Promise<void> {
     await cacheSet('hot', 'auction-lowest-all-by-id', 'latest', allById, firstPage.lastUpdated);
   }
 
-  // Cache raw auction pages for rebuild capability
-  await cacheSet('hot', 'auctions-raw-pages', 'latest', allRawAuctions, firstPage.lastUpdated);
-
   // Cache full tracked state (active + pending) so API can serve it and it's recoverable
   const trackedSnapshot = Object.fromEntries(allTracked);
   await cacheSet('hot', 'auctions-active', 'latest', trackedSnapshot, firstPage.lastUpdated);

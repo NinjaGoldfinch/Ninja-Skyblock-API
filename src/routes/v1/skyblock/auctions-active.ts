@@ -3,7 +3,6 @@ import { cacheGet } from '../../../services/cache-manager.js';
 import { enforceClientRateLimit } from '../../../services/rate-limiter.js';
 import { errors } from '../../../utils/errors.js';
 import type { TrackedAuction } from '../../../workers/auction-scanner.js';
-import type { HypixelAuction } from '../../../types/hypixel.js';
 
 export async function auctionsActiveRoute(app: FastifyInstance): Promise<void> {
   // GET /v1/skyblock/auctions/active — all tracked active auctions
@@ -79,41 +78,4 @@ export async function auctionsActiveRoute(app: FastifyInstance): Promise<void> {
     },
   );
 
-  // GET /v1/skyblock/auctions/raw — raw Hypixel auction data from last full scan
-  app.get(
-    '/v1/skyblock/auctions/raw',
-    {
-      schema: {
-        tags: ['auctions'],
-        summary: 'Get raw auction page data',
-        description: 'Returns the raw Hypixel auction data from the last full scan. Useful for rebuilding state if processing breaks.',
-        response: {
-          200: {
-            type: 'object',
-            properties: {
-              success: { type: 'boolean', const: true },
-              data: { type: 'object', additionalProperties: true },
-              meta: { $ref: 'response-meta#' },
-            },
-          },
-          400: { $ref: 'error-response#' },
-          429: { $ref: 'error-response#' },
-        },
-      },
-    },
-    async (request: FastifyRequest) => {
-      await enforceClientRateLimit(request.clientId, request.clientRateLimit);
-
-      const cached = await cacheGet<HypixelAuction[]>('hot', 'auctions-raw-pages', 'latest');
-      if (cached) {
-        return {
-          success: true,
-          data: { auctions: cached.data, count: cached.data.length },
-          meta: { cached: true, cache_age_seconds: cached.cache_age_seconds, timestamp: Date.now() },
-        };
-      }
-
-      throw errors.validation('Raw auction data not available yet. The auction worker may not have run.');
-    },
-  );
 }
