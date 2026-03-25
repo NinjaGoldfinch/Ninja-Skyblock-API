@@ -12,12 +12,71 @@ const QUEUE_NAME = 'auction-scanner';
 
 const ENDING_SOON_WINDOW_MS = 120_000; // 2 minutes
 
-export interface LowestBinData {
+// Known reforge prefixes to strip when extracting base item name
+const REFORGE_PREFIXES = [
+  'Withered', 'Fabled', 'Heroic', 'Suspicious', 'Ancient', 'Titanic',
+  'Wise', 'Fierce', 'Legendary', 'Mythic', 'Epic', 'Heavy', 'Light',
+  'Lucky', 'Rapid', 'Fair', 'Sharp', 'Forceful', 'Strong', 'Hurtful',
+  'Keen', 'Spiritual', 'Odd', 'Rich', 'Gentle', 'Bizarre', 'Neat',
+  'Fast', 'Fine', 'Grand', 'Hasty', 'Clean', 'Deadly', 'Unreal',
+  'Awkward', 'Spicy', 'Treacherous', 'Demonic', 'Salty', 'Silky',
+  'Bloody', 'Shaded', 'Sweet', 'Warped', 'Loving', 'Itchy',
+  'Ominous', 'Pleasant', 'Zealous', 'Godly', 'Superior',
+  'Renowned', 'Submerged', 'Perfect', 'Auspicious', 'Moil',
+  'Toil', 'Blooming', 'Stellar', 'Jaded', 'Sighted',
+  'Shiny',
+];
+
+export interface AuctionItemData {
   item_name: string;
   price: number;
   auction_id: string;
   seller_uuid: string;
   ends_at: number;
+  tier: string;
+  category: string;
+}
+
+export interface LowestBinData {
+  base_item: string;
+  lowest: AuctionItemData;
+  listings: AuctionItemData[];
+  count: number;
+}
+
+/**
+ * Extract a base item name by stripping reforges, stars, and formatting.
+ * "Withered Hyperion ✪✪✪✪✪➎" -> "Hyperion"
+ * "[Lvl 100] Baby Yeti" -> "Baby Yeti" (pet)
+ * "⚚ Spiritual Bonemerang ✪✪✪✪✪" -> "Bonemerang"
+ */
+function extractBaseItem(itemName: string): string {
+  let name = itemName;
+
+  // Strip leading special characters (⚚, etc.)
+  name = name.replace(/^[^\w\[]+/, '');
+
+  // Strip pet level prefix "[Lvl N] "
+  name = name.replace(/^\[Lvl \d+\]\s*/, '');
+
+  // Strip stars and upgrade symbols at end
+  name = name.replace(/[\s✪✦➊➋➌➍➎⚚]+$/g, '').trim();
+
+  // Strip "Shiny " prefix
+  if (name.startsWith('Shiny ')) {
+    name = name.slice(6);
+  }
+
+  // Strip reforge prefix (first word if it's a known reforge)
+  const firstSpace = name.indexOf(' ');
+  if (firstSpace > 0) {
+    const firstWord = name.slice(0, firstSpace);
+    if (REFORGE_PREFIXES.includes(firstWord)) {
+      name = name.slice(firstSpace + 1);
+    }
+  }
+
+  return name.trim();
 }
 
 // In-memory previous lowest BINs for change detection
@@ -26,73 +85,86 @@ let previousLowestBins = new Map<string, LowestBinData>();
 async function processAuctionJob(_job: Job): Promise<void> {
   const startTime = Date.now();
 
-  // Fetch first page to get totalPages
   const firstPage = await fetchAuctionsPage(0);
   if (!firstPage.success) {
     log.warn('Auction fetch returned success=false');
     return;
   }
 
-  // Collect all BIN auctions across all pages
+  // Collect all BIN auctions and ending-soon across all pages
   const allBinAuctions: HypixelAuction[] = [];
   const endingSoon: HypixelAuction[] = [];
   const now = Date.now();
 
-  // Process first page
-  for (const auction of firstPage.auctions) {
-    if (auction.bin) {
-      allBinAuctions.push(auction);
-    }
-    if (auction.end - now <= ENDING_SOON_WINDOW_MS && auction.end > now) {
-      endingSoon.push(auction);
+  function processPage(auctions: HypixelAuction[]): void {
+    for (const auction of auctions) {
+      if (auction.bin) {
+        allBinAuctions.push(auction);
+      }
+      if (auction.end - now <= ENDING_SOON_WINDOW_MS && auction.end > now) {
+        endingSoon.push(auction);
+      }
     }
   }
 
-  // Fetch remaining pages
+  processPage(firstPage.auctions);
+
   for (let page = 1; page < firstPage.totalPages; page++) {
     try {
       const pageData = await fetchAuctionsPage(page);
       if (!pageData.success) continue;
-      for (const auction of pageData.auctions) {
-        if (auction.bin) {
-          allBinAuctions.push(auction);
-        }
-        if (auction.end - now <= ENDING_SOON_WINDOW_MS && auction.end > now) {
-          endingSoon.push(auction);
-        }
-      }
+      processPage(pageData.auctions);
     } catch (err) {
       log.warn({ page, err }, 'Failed to fetch auction page');
     }
   }
 
-  // Find lowest BIN per item
-  const lowestBins = new Map<string, LowestBinData>();
+  // Group BIN auctions by base item name, sorted by price
+  const itemGroups = new Map<string, AuctionItemData[]>();
   for (const auction of allBinAuctions) {
-    const itemKey = auction.item_name;
-    const existing = lowestBins.get(itemKey);
-    if (!existing || auction.starting_bid < existing.price) {
-      lowestBins.set(itemKey, {
-        item_name: auction.item_name,
-        price: auction.starting_bid,
-        auction_id: auction.uuid,
-        seller_uuid: auction.auctioneer,
-        ends_at: auction.end,
-      });
+    const baseItem = extractBaseItem(auction.item_name);
+    const entry: AuctionItemData = {
+      item_name: auction.item_name,
+      price: auction.starting_bid,
+      auction_id: auction.uuid,
+      seller_uuid: auction.auctioneer,
+      ends_at: auction.end,
+      tier: auction.tier,
+      category: auction.category,
+    };
+
+    const group = itemGroups.get(baseItem);
+    if (group) {
+      group.push(entry);
+    } else {
+      itemGroups.set(baseItem, [entry]);
     }
+  }
+
+  // Build lowest BIN data per base item
+  const lowestBins = new Map<string, LowestBinData>();
+  for (const [baseItem, listings] of itemGroups) {
+    listings.sort((a, b) => a.price - b.price);
+    const lowest = listings[0]!;
+    lowestBins.set(baseItem, {
+      base_item: baseItem,
+      lowest,
+      listings: listings.slice(0, 20), // Top 20 cheapest
+      count: listings.length,
+    });
   }
 
   // Publish alerts for new lowest BINs
   let alertsPublished = 0;
-  for (const [itemName, data] of lowestBins) {
-    const previous = previousLowestBins.get(itemName);
-    if (previous && data.price < previous.price) {
+  for (const [baseItem, data] of lowestBins) {
+    const previous = previousLowestBins.get(baseItem);
+    if (previous && data.lowest.price < previous.lowest.price) {
       await publish('auction:alerts', {
         type: 'auction:new_lowest_bin',
-        item_id: itemName,
-        item_name: itemName,
-        price: data.price,
-        auction_id: data.auction_id,
+        item_id: baseItem,
+        item_name: data.lowest.item_name,
+        price: data.lowest.price,
+        auction_id: data.lowest.auction_id,
         timestamp: Date.now(),
       });
       alertsPublished++;
@@ -103,7 +175,7 @@ async function processAuctionJob(_job: Job): Promise<void> {
   for (const auction of endingSoon) {
     await publish('auction:ending', {
       type: 'auction:ending_soon',
-      item_id: auction.item_name,
+      item_id: extractBaseItem(auction.item_name),
       item_name: auction.item_name,
       price: auction.bin ? auction.starting_bid : auction.highest_bid_amount,
       auction_id: auction.uuid,
@@ -112,9 +184,9 @@ async function processAuctionJob(_job: Job): Promise<void> {
     });
   }
 
-  // Update cache with lowest BINs
-  const cacheEntries = Array.from(lowestBins.entries()).map(([itemName, data]) => ({
-    id: itemName,
+  // Cache lowest BINs keyed by base item name
+  const cacheEntries = Array.from(lowestBins.entries()).map(([baseItem, data]) => ({
+    id: baseItem,
     data,
   }));
   if (cacheEntries.length > 0) {
