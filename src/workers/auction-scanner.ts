@@ -125,25 +125,48 @@ async function processAuctionJob(_job: Job): Promise<void> {
   // Process page 0 (already fetched)
   processPage(firstPage.auctions);
 
-  // Fetch all remaining pages in parallel (all at once)
-  const parallelCount = firstPage.totalPages - 1;
+  const totalRemaining = firstPage.totalPages - 1;
+  const PRIORITY_PAGES = 15; // First N pages have the most actively traded items
+  const priorityCount = Math.min(PRIORITY_PAGES, totalRemaining);
+  const remainingCount = totalRemaining - priorityCount;
   const fetchStart = Date.now();
-  const pagePromises = Array.from(
-    { length: parallelCount },
+  let pagesSucceeded = 1; // page 0 already succeeded
+
+  // Fetch priority pages first (pages 1-15)
+  const priorityPromises = Array.from(
+    { length: priorityCount },
     (_, i) => fetchAuctionsPage(i + 1).catch((err) => {
       log.warn({ page: i + 1, err }, 'Failed to fetch auction page');
       return null;
     }),
   );
-  const pages = await Promise.all(pagePromises);
-  const fetchDuration = Date.now() - fetchStart;
-  let pagesSucceeded = 0;
-  for (const pageData of pages) {
+  const priorityPages = await Promise.all(priorityPromises);
+  for (const pageData of priorityPages) {
     if (pageData?.success) {
       processPage(pageData.auctions);
       pagesSucceeded++;
     }
   }
+
+  // Then fetch remaining pages (16+)
+  if (remainingCount > 0) {
+    const remainingPromises = Array.from(
+      { length: remainingCount },
+      (_, i) => fetchAuctionsPage(i + 1 + priorityCount).catch((err) => {
+        log.warn({ page: i + 1 + priorityCount, err }, 'Failed to fetch auction page');
+        return null;
+      }),
+    );
+    const remainingPages = await Promise.all(remainingPromises);
+    for (const pageData of remainingPages) {
+      if (pageData?.success) {
+        processPage(pageData.auctions);
+        pagesSucceeded++;
+      }
+    }
+  }
+
+  const fetchDuration = Date.now() - fetchStart;
 
   // Group BIN auctions by base item name, sorted by price
   const itemGroups = new Map<string, AuctionItemData[]>();
@@ -224,8 +247,8 @@ async function processAuctionJob(_job: Job): Promise<void> {
   log.info({
     total_auctions: firstPage.totalAuctions,
     pages: firstPage.totalPages,
-    pages_parallel: parallelCount,
-    pages_succeeded: pagesSucceeded + 1, // +1 for page 0
+    priority_pages: priorityCount + 1, // +1 for page 0
+    pages_succeeded: pagesSucceeded,
     fetch_duration_ms: fetchDuration,
     bin_auctions: allBinAuctions.length,
     unique_items: lowestBins.size,
