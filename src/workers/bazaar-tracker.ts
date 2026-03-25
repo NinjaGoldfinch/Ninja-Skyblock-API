@@ -16,7 +16,7 @@ let previousSnapshot = new Map<string, BazaarProductData>();
 
 interface RawSnapshotRow {
   item_id: string;
-  raw_data: string; // JSONB — PostgREST accepts stringified JSON
+  raw_data: Record<string, unknown>; // JSONB object — PostgREST serializes it
 }
 
 // Processed data for the warm cache and API responses
@@ -86,7 +86,7 @@ async function processBazaarJob(_job: Job): Promise<void> {
     // Store raw Hypixel data in Postgres
     snapshotRows.push({
       item_id: productId,
-      raw_data: JSON.stringify(product),
+      raw_data: product as unknown as Record<string, unknown>,
     });
 
     // Compare against in-memory previous snapshot for alerts
