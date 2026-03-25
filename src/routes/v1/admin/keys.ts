@@ -31,7 +31,7 @@ export async function adminKeysRoute(app: FastifyInstance): Promise<void> {
             type: 'object',
             properties: {
               success: { type: 'boolean', const: true },
-              data: { type: 'object', description: 'Generated API key details.' },
+              data: { type: 'object', additionalProperties: true, description: 'Generated API key details.' },
               meta: { $ref: 'response-meta#' },
             },
           },

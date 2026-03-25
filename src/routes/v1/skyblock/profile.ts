@@ -119,7 +119,7 @@ export async function profileRoute(app: FastifyInstance): Promise<void> {
             type: 'object',
             properties: {
               success: { type: 'boolean', const: true },
-              data: { type: 'object', description: 'Processed SkyBlock profile data.' },
+              data: { type: 'object', additionalProperties: true, description: 'Processed SkyBlock profile data.' },
               meta: { $ref: 'response-meta#' },
             },
           },

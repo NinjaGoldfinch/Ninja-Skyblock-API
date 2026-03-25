@@ -57,7 +57,7 @@ export async function bazaarRoute(app: FastifyInstance): Promise<void> {
             type: 'object',
             properties: {
               success: { type: 'boolean', const: true },
-              data: { type: 'object', description: 'Bazaar product data with instant and average prices.' },
+              data: { type: 'object', additionalProperties: true, description: 'Bazaar product data with instant and average prices.' },
               meta: { $ref: 'response-meta#' },
             },
           },
@@ -109,7 +109,7 @@ export async function bazaarRoute(app: FastifyInstance): Promise<void> {
             type: 'object',
             properties: {
               success: { type: 'boolean', const: true },
-              data: { type: 'object', description: 'Price history with datapoints and period summary.' },
+              data: { type: 'object', additionalProperties: true, description: 'Price history with datapoints and period summary.' },
               meta: { $ref: 'response-meta#' },
             },
           },
