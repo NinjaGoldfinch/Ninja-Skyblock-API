@@ -24,7 +24,7 @@ import { specRoute } from './routes/v1/docs/spec.js';
 import { redocRoute } from './routes/v1/docs/redoc.js';
 
 const app = Fastify({
-  ignoreTrailingSlash: true,
+  routerOptions: { ignoreTrailingSlash: true },
   logger: {
     level: env.LOG_LEVEL,
     transport: env.NODE_ENV === 'development'

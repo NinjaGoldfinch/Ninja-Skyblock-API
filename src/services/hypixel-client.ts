@@ -1,4 +1,4 @@
-import { Agent } from 'undici';
+import { Agent, setGlobalDispatcher } from 'undici';
 import { env } from '../config/env.js';
 import { HYPIXEL_BASE_URL } from '../config/constants.js';
 import { errors } from '../utils/errors.js';
@@ -10,11 +10,11 @@ import type {
 
 const log = createLogger('hypixel-client');
 
-// Allow up to 100 concurrent connections to Hypixel API
-const dispatcher = new Agent({
+// Allow up to 100 concurrent connections per origin (default is ~10)
+setGlobalDispatcher(new Agent({
   connections: 100,
   pipelining: 1,
-});
+}));
 
 interface HypixelRequestOptions {
   endpoint: string;
@@ -46,8 +46,7 @@ async function fetchHypixel<T>(options: HypixelRequestOptions): Promise<T> {
         'API-Key': env.HYPIXEL_API_KEY,
         'Accept': 'application/json',
       },
-      dispatcher,
-    } as RequestInit);
+    });
 
     // 403 — invalid key, stop immediately
     if (response.status === 403) {
@@ -167,7 +166,7 @@ export async function fetchConditional<T>(
   }
 
   const startTime = Date.now();
-  const response = await fetch(url.toString(), { headers, dispatcher } as RequestInit);
+  const response = await fetch(url.toString(), { headers });
 
   // 304 Not Modified — data hasn't changed
   if (response.status === 304) {
