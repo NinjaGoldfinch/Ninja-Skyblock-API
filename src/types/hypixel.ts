@@ -121,6 +121,28 @@ export interface HypixelAuction {
   item_bytes: string;
 }
 
+export interface HypixelPlayerAuctionsResponse {
+  success: boolean;
+  auctions: HypixelAuction[];
+}
+
+export interface HypixelEndedAuction {
+  auction_id: string;
+  seller: string;
+  seller_profile: string;
+  buyer: string;
+  timestamp: number;
+  price: number;
+  bin: boolean;
+  item_bytes: string;
+}
+
+export interface HypixelEndedAuctionsResponse {
+  success: boolean;
+  lastUpdated: number;
+  auctions: HypixelEndedAuction[];
+}
+
 export interface HypixelAuctionsPageResponse {
   success: boolean;
   page: number;

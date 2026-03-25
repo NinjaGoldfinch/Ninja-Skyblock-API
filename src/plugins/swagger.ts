@@ -28,6 +28,7 @@ export const swaggerPlugin = fp(async (app: FastifyInstance) => {
         { name: 'bazaar', description: 'Bazaar pricing, live data, and price history' },
         { name: 'auctions', description: 'Auction house lookups and lowest BIN tracking' },
         { name: 'events', description: 'Real-time event streams (SSE and WebSocket)' },
+        { name: 'player', description: 'Minecraft player lookups (UUID resolution)' },
         { name: 'admin', description: 'Administrative endpoints (API key management)' },
         { name: 'health', description: 'Service health and status' },
       ],
