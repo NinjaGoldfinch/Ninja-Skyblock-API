@@ -2,6 +2,7 @@ import Fastify from 'fastify';
 import { env } from './config/env.js';
 import { AppError } from './utils/errors.js';
 import { closeRedis } from './utils/redis.js';
+import { cacheGet } from './services/cache-manager.js';
 import { logger } from './utils/logger.js';
 import { profileRoute } from './routes/v1/skyblock/profile.js';
 import { bazaarRoute } from './routes/v1/skyblock/bazaar.js';
@@ -121,7 +122,24 @@ app.get('/v1/health', {
     },
   },
 }, async () => {
-  return { success: true, data: { status: 'ok' }, meta: { cached: false, cache_age_seconds: null, timestamp: Date.now() } };
+  // Check which data sources are available
+  const checks = {
+    bazaar: await cacheGet('warm', 'bazaar-all', 'latest').then((r) => !!r).catch(() => false),
+    auctions: await cacheGet('hot', 'auction-lowest-all', 'latest').then((r) => !!r).catch(() => false),
+    items: await cacheGet('warm', 'resources', 'items').then((r) => !!r).catch(() => false),
+    collections: await cacheGet('warm', 'resources', 'collections').then((r) => !!r).catch(() => false),
+    skills: await cacheGet('warm', 'resources', 'skills').then((r) => !!r).catch(() => false),
+    election: await cacheGet('warm', 'resources', 'election').then((r) => !!r).catch(() => false),
+  };
+  const allHealthy = Object.values(checks).every(Boolean);
+  return {
+    success: true,
+    data: {
+      status: allHealthy ? 'ok' : 'degraded',
+      services: checks,
+    },
+    meta: { cached: false, cache_age_seconds: null, timestamp: Date.now() },
+  };
 });
 
 const start = async () => {

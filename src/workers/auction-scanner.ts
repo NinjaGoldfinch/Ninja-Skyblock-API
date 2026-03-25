@@ -88,6 +88,10 @@ const recentlySoldIds = new Set<string>();
 // Previous lowest BINs for alerts
 let previousLowestBins = new Map<string, LowestBinData>();
 
+// Dependency status
+let itemsAvailable = false;
+let needsReprocess = false; // True when auctions were tracked without item resolution
+
 // Last-modified headers
 let activeLastModified: string | undefined;
 let endedLastModified: string | undefined;
@@ -271,16 +275,34 @@ async function processEndedAuctions(): Promise<{ soldCount: number; expiredCount
 async function processActiveAuctions(_job: Job): Promise<void> {
   const startTime = Date.now();
 
-  // Wait for items worker
+  // Load item resolution data (optional — auctions still tracked without it)
   const itemNamesCache = await cacheGet<string[]>('warm', 'resources', 'item-known-names');
-  if (!itemNamesCache) {
-    log.info('Waiting for items worker to cache item names — skipping this cycle');
-    return;
-  }
-  knownItemNames = new Set(itemNamesCache.data);
-
   const nameToIdCache = await cacheGet<Record<string, string>>('warm', 'resources', 'item-name-to-id');
+
+  const wasAvailable = itemsAvailable;
+  itemsAvailable = !!itemNamesCache;
+
+  if (itemNamesCache) {
+    knownItemNames = new Set(itemNamesCache.data);
+  }
   const nameToId = nameToIdCache?.data ?? {};
+
+  // If items just became available and we have unresolved auctions, reprocess them
+  if (itemsAvailable && !wasAvailable && allTracked.size > 0) {
+    needsReprocess = true;
+    log.info({ tracked: allTracked.size }, 'Items cache now available — reprocessing tracked auctions');
+  }
+
+  if (needsReprocess && itemsAvailable) {
+    for (const auction of allTracked.values()) {
+      const newBase = extractBaseItem(auction.item_name);
+      if (newBase !== auction.base_item || !auction.skyblock_id) {
+        auction.base_item = newBase;
+        auction.skyblock_id = nameToId[newBase] ?? null;
+      }
+    }
+    needsReprocess = false;
+  }
 
   // Conditional fetch on page 0
   const checkResult = await fetchConditional<HypixelAuctionsPageResponse>(
@@ -484,8 +506,9 @@ async function processActiveAuctions(_job: Job): Promise<void> {
   const durationMs = Date.now() - startTime;
 
   // Compact info line — just the changes that matter
+  const statusFlags = itemsAvailable ? '' : ' [NO ITEM RESOLUTION]';
   log.info(
-    `Auctions | +${addedCount} -${removedCount} ~${updatedCount} | sold:${soldCount} expired:${expiredCount} | tracked:${allTracked.size} (bin:${binAuctions.size} reg:${regularAuctions.size}) pending:${pendingAuctions.size} | items:${lowestBins.size} alerts:${alertsPublished} | ${durationMs}ms`,
+    `Auctions | +${addedCount} -${removedCount} ~${updatedCount} | sold:${soldCount} expired:${expiredCount} | tracked:${allTracked.size} (bin:${binAuctions.size} reg:${regularAuctions.size}) pending:${pendingAuctions.size} | items:${lowestBins.size} alerts:${alertsPublished} | ${durationMs}ms${statusFlags}`,
   );
 
   // Full details behind debug
