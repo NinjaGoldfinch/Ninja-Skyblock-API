@@ -12,6 +12,8 @@ import { startProfileTracker } from './workers/profile-tracker.js';
 import { closeQueues } from './utils/queue.js';
 import { sseRoute } from './routes/v1/events/stream.js';
 import { adminKeysRoute } from './routes/v1/admin/keys.js';
+import { watchedPlayersRoute } from './routes/v1/admin/watched-players.js';
+import { auctionsRoute } from './routes/v1/skyblock/auctions.js';
 import { setupWebSocket } from './routes/v1/events/subscribe.js';
 import { closeEventBus } from './services/event-bus.js';
 import { swaggerPlugin } from './plugins/swagger.js';
@@ -68,7 +70,9 @@ app.register(authPlugin);
 app.register(profileRoute);
 app.register(bazaarRoute);
 app.register(sseRoute);
+app.register(auctionsRoute);
 app.register(adminKeysRoute);
+app.register(watchedPlayersRoute);
 
 // Docs
 app.register(specRoute);

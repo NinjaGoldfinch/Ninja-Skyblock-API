@@ -59,8 +59,11 @@ Phase 4 Core — complete
 
 ## Known issues
 - Networth computation is a placeholder — needs NBT inventory decoding and bazaar/AH price lookups (Phase 2 dependency)
+- [NOTE] Hypixel /v2/skyblock/auctions is a cached public endpoint — does not count against API key rate limit
 - Bazaar history averages are computed in Node over all rows — should move to Postgres aggregation before data grows large (weeks of snapshots)
 - Bazaar raw JSONB storage will grow fast — add a scheduled data retention job: strip order books after 24h, aggregate to hourly after 7d, delete raw after 30d
+- [RESOLVED] Watched players now manageable via API (GET/POST/DELETE /v1/admin/watched-players)
+- [RESOLVED] Auction lowest BIN now exposed via GET /v1/skyblock/auctions/lowest/:item
 
 ## Decisions made
 - Networth processor returns bank+purse only for now; full item valuation deferred to Phase 2 when price data is available
