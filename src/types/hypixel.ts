@@ -76,8 +76,16 @@ export interface HypixelProfileResponse {
   profile: HypixelSkyBlockProfile | null;
 }
 
+export interface HypixelBazaarOrder {
+  amount: number;
+  pricePerUnit: number;
+  orders: number;
+}
+
 export interface HypixelBazaarProduct {
   product_id: string;
+  sell_summary: HypixelBazaarOrder[];
+  buy_summary: HypixelBazaarOrder[];
   quick_status: {
     buyPrice: number;
     buyVolume: number;

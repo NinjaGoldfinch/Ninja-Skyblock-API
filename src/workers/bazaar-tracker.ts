@@ -35,10 +35,16 @@ interface BazaarProductData {
 
 function transformProduct(productId: string, product: HypixelBazaarProduct): BazaarProductData {
   const qs = product.quick_status;
+
+  // Instant buy price = cheapest sell order (first entry in sell_summary)
+  // Instant sell price = highest buy order (first entry in buy_summary)
+  const instantBuyPrice = product.sell_summary[0]?.pricePerUnit ?? qs.buyPrice;
+  const instantSellPrice = product.buy_summary[0]?.pricePerUnit ?? qs.sellPrice;
+
   return {
     item_id: productId,
-    buy_price: qs.buyPrice,
-    sell_price: qs.sellPrice,
+    buy_price: instantBuyPrice,
+    sell_price: instantSellPrice,
     buy_volume: qs.buyVolume,
     sell_volume: qs.sellVolume,
     buy_orders: qs.buyOrders,
