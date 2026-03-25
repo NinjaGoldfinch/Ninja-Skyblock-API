@@ -58,9 +58,9 @@ function extractBaseItem(itemName: string): string {
   // Strip leading special characters (⚚, etc.)
   name = name.replace(/^[^\w\[]+/, '');
 
-  // Strip pet level prefixes: "[Lvl N] " and "[N✦] "
+  // Strip pet level prefixes: "[Lvl N] ", "[N✦] ", "[N⚔] ", etc.
   name = name.replace(/^\[Lvl \d+\]\s*/, '');
-  name = name.replace(/^\[\d+✦?\]\s*/, '');
+  name = name.replace(/^\[\d+[^\]]*\]\s*/, '');
 
   // Strip stars and upgrade symbols at end
   name = name.replace(/[\s✪✦➊➋➌➍➎⚚]+$/g, '').trim();
