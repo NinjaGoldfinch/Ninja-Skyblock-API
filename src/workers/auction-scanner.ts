@@ -219,11 +219,24 @@ async function processEndedAuctions(): Promise<{ soldCount: number; expiredCount
     if (recentlySoldIds.has(auctionId)) {
       // Confirmed sold — find buyer/price from ended data
       const endedData = response.auctions.find((e) => e.auction_id === auctionId);
-      historyRows.push(toHistoryRow(
-        pending.auction, 'sold',
-        endedData?.buyer ?? null,
-        endedData?.price ?? pending.auction.price,
-      ));
+      const finalPrice = endedData?.price ?? pending.auction.price;
+      const buyerUuid = endedData?.buyer ?? null;
+      historyRows.push(toHistoryRow(pending.auction, 'sold', buyerUuid, finalPrice));
+
+      // Publish sold event
+      await publish('auction:sold', {
+        type: 'auction:sold',
+        auction_id: auctionId,
+        skyblock_id: pending.auction.skyblock_id,
+        base_item: pending.auction.base_item,
+        item_name: pending.auction.item_name,
+        seller_uuid: pending.auction.seller_uuid,
+        buyer_uuid: buyerUuid,
+        price: finalPrice,
+        bin: pending.auction.bin,
+        timestamp: Date.now(),
+      });
+
       pendingAuctions.delete(auctionId);
       soldCount++;
     } else if (now - pending.removed_at > PENDING_TIMEOUT_MS) {
@@ -348,10 +361,13 @@ async function processActiveAuctions(_job: Job): Promise<void> {
   let updatedCount = 0;
 
   // Add new / update existing
+  const newListings: TrackedAuction[] = [];
   for (const auction of allRawAuctions) {
     const existing = allTracked.get(auction.uuid);
     if (!existing) {
-      allTracked.set(auction.uuid, processNewAuction(auction, nameToId));
+      const tracked = processNewAuction(auction, nameToId);
+      allTracked.set(auction.uuid, tracked);
+      newListings.push(tracked);
       addedCount++;
     } else if (!existing.bin && auction.highest_bid_amount > existing.highest_bid) {
       existing.highest_bid = auction.highest_bid_amount;
@@ -376,23 +392,61 @@ async function processActiveAuctions(_job: Job): Promise<void> {
   rebuildViews();
   const lowestBins = buildLowestBins();
 
-  // Publish alerts
+  // --- Publish events ---
   let alertsPublished = 0;
+
+  // New listing events
+  for (const listing of newListings) {
+    await publish('auction:new-listing', {
+      type: 'auction:new-listing',
+      auction_id: listing.auction_id,
+      skyblock_id: listing.skyblock_id,
+      base_item: listing.base_item,
+      item_name: listing.item_name,
+      price: listing.price,
+      seller_uuid: listing.seller_uuid,
+      ends_at: listing.ends_at,
+      bin: listing.bin,
+      tier: listing.tier,
+      timestamp: Date.now(),
+    });
+  }
+
+  // Lowest BIN change events (both increases and decreases)
   for (const [baseItem, data] of lowestBins) {
     const previous = previousLowestBins.get(baseItem);
-    if (previous && data.lowest.price < previous.lowest.price) {
-      await publish('auction:alerts', {
-        type: 'auction:new_lowest_bin',
-        item_id: baseItem,
-        item_name: data.lowest.item_name,
-        price: data.lowest.price,
+    if (previous && data.lowest.price !== previous.lowest.price) {
+      const changePct = previous.lowest.price > 0
+        ? Math.round(((data.lowest.price - previous.lowest.price) / previous.lowest.price) * 10000) / 100
+        : 0;
+      await publish('auction:lowest-bin-change', {
+        type: 'auction:lowest-bin-change',
+        skyblock_id: data.skyblock_id,
+        base_item: baseItem,
+        old_price: previous.lowest.price,
+        new_price: data.lowest.price,
         auction_id: data.lowest.auction_id,
+        item_name: data.lowest.item_name,
+        change_pct: changePct,
         timestamp: Date.now(),
       });
       alertsPublished++;
+
+      // Also publish on the legacy channel for backwards compat
+      if (data.lowest.price < previous.lowest.price) {
+        await publish('auction:alerts', {
+          type: 'auction:new_lowest_bin',
+          item_id: baseItem,
+          item_name: data.lowest.item_name,
+          price: data.lowest.price,
+          auction_id: data.lowest.auction_id,
+          timestamp: Date.now(),
+        });
+      }
     }
   }
 
+  // Ending soon events
   for (const auction of endingSoon) {
     await publish('auction:ending', {
       type: 'auction:ending_soon',

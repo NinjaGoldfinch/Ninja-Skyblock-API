@@ -1,6 +1,7 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { cacheGet } from '../../../services/cache-manager.js';
 import { getRedis } from '../../../utils/redis.js';
+import { postgrestSelect } from '../../../services/postgrest-client.js';
 import { enforceClientRateLimit } from '../../../services/rate-limiter.js';
 import { errors } from '../../../utils/errors.js';
 import type { LowestBinData } from '../../../workers/auction-scanner.js';
@@ -255,4 +256,96 @@ export async function v2AuctionsRoute(app: FastifyInstance): Promise<void> {
       };
     },
   );
+
+  // GET /v2/skyblock/auctions/history — query completed auction history
+  app.get<{ Querystring: HistoryQuery }>(
+    '/v2/skyblock/auctions/history',
+    {
+      schema: {
+        tags: ['auctions'],
+        summary: 'Query auction sale history',
+        description: 'Returns completed auctions from Postgres. Filter by auction_id, skyblock_id, base_item, seller_uuid, buyer_uuid, or outcome. Results ordered by ended_at descending.',
+        querystring: {
+          type: 'object',
+          properties: {
+            auction_id: { type: 'string', description: 'Exact auction UUID.' },
+            skyblock_id: { type: 'string', description: 'SkyBlock item ID (e.g. HYPERION).' },
+            base_item: { type: 'string', description: 'Base item name (e.g. Hyperion).' },
+            seller_uuid: { type: 'string', description: 'Seller player UUID.' },
+            buyer_uuid: { type: 'string', description: 'Buyer player UUID.' },
+            outcome: { type: 'string', enum: ['sold', 'expired', 'cancelled'], description: 'Auction outcome.' },
+            limit: { type: 'integer', minimum: 1, maximum: 500, default: 50, description: 'Max results.' },
+          },
+        },
+        response: {
+          200: {
+            type: 'object',
+            properties: {
+              success: { type: 'boolean', const: true },
+              data: { type: 'object', additionalProperties: true },
+              meta: { $ref: 'response-meta#' },
+            },
+          },
+          429: { $ref: 'error-response#' },
+        },
+      },
+    },
+    async (request: FastifyRequest<{ Querystring: HistoryQuery }>) => {
+      await enforceClientRateLimit(request.clientId, request.clientRateLimit);
+
+      const q = request.query;
+      const query: Record<string, string> = {};
+      if (q.auction_id) query['auction_id'] = `eq.${q.auction_id}`;
+      if (q.skyblock_id) query['skyblock_id'] = `eq.${q.skyblock_id}`;
+      if (q.base_item) query['base_item'] = `eq.${q.base_item}`;
+      if (q.seller_uuid) query['seller_uuid'] = `eq.${q.seller_uuid}`;
+      if (q.buyer_uuid) query['buyer_uuid'] = `eq.${q.buyer_uuid}`;
+      if (q.outcome) query['outcome'] = `eq.${q.outcome}`;
+
+      let rows: AuctionHistoryRow[];
+      try {
+        rows = await postgrestSelect<AuctionHistoryRow>({
+          table: 'auction_history',
+          query,
+          order: 'ended_at.desc',
+          limit: q.limit ?? 50,
+        });
+      } catch {
+        rows = [];
+      }
+
+      return {
+        success: true,
+        data: { auctions: rows, count: rows.length },
+        meta: { cached: false, cache_age_seconds: null, timestamp: Date.now() },
+      };
+    },
+  );
+}
+
+interface HistoryQuery {
+  auction_id?: string;
+  skyblock_id?: string;
+  base_item?: string;
+  seller_uuid?: string;
+  buyer_uuid?: string;
+  outcome?: 'sold' | 'expired' | 'cancelled';
+  limit?: number;
+}
+
+interface AuctionHistoryRow {
+  auction_id: string;
+  skyblock_id: string | null;
+  base_item: string;
+  item_name: string;
+  seller_uuid: string;
+  buyer_uuid: string | null;
+  starting_bid: number;
+  final_price: number;
+  bin: boolean;
+  tier: string | null;
+  category: string | null;
+  outcome: string;
+  started_at: string;
+  ended_at: string;
 }

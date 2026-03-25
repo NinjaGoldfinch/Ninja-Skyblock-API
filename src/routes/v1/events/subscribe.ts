@@ -78,7 +78,12 @@ interface SubscribeMessage {
   };
 }
 
-const ALL_CHANNELS: EventChannel[] = ['bazaar:alerts', 'auction:alerts', 'auction:ending', 'profile:changes'];
+const ALL_CHANNELS: EventChannel[] = [
+  'bazaar:alerts',
+  'auction:alerts', 'auction:sold', 'auction:new-listing',
+  'auction:lowest-bin-change', 'auction:ending',
+  'profile:changes',
+];
 
 export async function setupWebSocket(server: Server): Promise<void> {
   const wss = new WebSocketServer({ server, path: '/v1/events/subscribe' });

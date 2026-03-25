@@ -5,6 +5,9 @@ export type EventChannel =
   | 'bazaar:alerts'
   | 'auction:alerts'
   | 'auction:ending'
+  | 'auction:sold'
+  | 'auction:new-listing'
+  | 'auction:lowest-bin-change'
   | 'profile:changes';
 
 export interface BazaarAlertEvent {
@@ -41,6 +44,45 @@ export interface AuctionEndingEvent {
   timestamp: number;
 }
 
+export interface AuctionSoldEvent {
+  type: 'auction:sold';
+  auction_id: string;
+  skyblock_id: string | null;
+  base_item: string;
+  item_name: string;
+  seller_uuid: string;
+  buyer_uuid: string | null;
+  price: number;
+  bin: boolean;
+  timestamp: number;
+}
+
+export interface AuctionNewListingEvent {
+  type: 'auction:new-listing';
+  auction_id: string;
+  skyblock_id: string | null;
+  base_item: string;
+  item_name: string;
+  price: number;
+  seller_uuid: string;
+  ends_at: number;
+  bin: boolean;
+  tier: string;
+  timestamp: number;
+}
+
+export interface AuctionLowestBinChangeEvent {
+  type: 'auction:lowest-bin-change';
+  skyblock_id: string | null;
+  base_item: string;
+  old_price: number;
+  new_price: number;
+  auction_id: string;
+  item_name: string;
+  change_pct: number;
+  timestamp: number;
+}
+
 export interface ProfileChangeEvent {
   type: 'profile:change';
   player_uuid: string;
@@ -53,6 +95,9 @@ export type EventPayload =
   | BazaarAlertEvent
   | AuctionAlertEvent
   | AuctionEndingEvent
+  | AuctionSoldEvent
+  | AuctionNewListingEvent
+  | AuctionLowestBinChangeEvent
   | ProfileChangeEvent;
 
 type EventHandler = (channel: string, event: EventPayload) => void;
