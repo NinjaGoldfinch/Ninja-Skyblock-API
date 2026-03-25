@@ -5,7 +5,7 @@ ninja-skyblock-api — Backend API proxying Hypixel API for SkyBlock endpoints.
 See ARCHITECTURE.md for full specification.
 
 ## Current phase
-Phase 2 Core — step 3 of 4
+Phase 2 Core — complete
 
 ## Completed steps
 
@@ -23,7 +23,7 @@ Phase 2 Core — step 3 of 4
 - [x] 1. BullMQ queue setup
 - [x] 2. Bazaar tracker worker
 - [x] 3. PostgreSQL schema (migrations)
-- [ ] 4. Bazaar history endpoint
+- [x] 4. Bazaar history endpoint
 
 ## What works
 - Step 1: `tsc --noEmit` passes, server boots with env vars set, exits cleanly on timeout
@@ -37,6 +37,7 @@ Phase 2 Core — step 3 of 4
 - Phase 2 Step 1: BullMQ queue factory creates named queues/workers backed by Redis
 - Phase 2 Step 2: Bazaar tracker polls Hypixel every 60s, caches products in warm tier, stores snapshots to Postgres
 - Phase 2 Step 3: Initial migration creates bazaar_snapshots, auction_sales, player_profiles tables
+- Phase 2 Step 4: Bazaar current price endpoint (from warm cache) and history endpoint (from Postgres)
 
 ## Known issues
 - Networth computation is a placeholder — needs NBT inventory decoding and bazaar/AH price lookups (Phase 2 dependency)
@@ -48,4 +49,4 @@ Phase 2 Core — step 3 of 4
 - Profile route uses profile UUID (not player UUID). Calls Hypixel /v2/skyblock/profile?profile=UUID. Phase 2 will add separate endpoints for player-based lookups, active profile, etc.
 
 ## Next step
-Phase 2 Step 4: Bazaar history endpoint — reads from Postgres, returns time-series data.
+Phase 2 Core complete. Next: Phase 2 "then" items (auction scanner, profile tracker) or Phase 3.
