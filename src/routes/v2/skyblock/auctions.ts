@@ -321,6 +321,65 @@ export async function v2AuctionsRoute(app: FastifyInstance): Promise<void> {
       };
     },
   );
+
+  // GET /v2/skyblock/auctions/item-data/:auctionId — get item_bytes for an auction
+  app.get<{ Params: { auctionId: string } }>(
+    '/v2/skyblock/auctions/item-data/:auctionId',
+    {
+      schema: {
+        tags: ['auctions'],
+        summary: 'Get auction item NBT data',
+        description: 'Returns the base64-encoded NBT item_bytes for an auction. Decode for enchantments, reforges, gemstones, stars, etc. Data stored in Postgres, available for active and completed auctions.',
+        params: {
+          type: 'object',
+          required: ['auctionId'],
+          properties: {
+            auctionId: { type: 'string', description: 'Auction UUID.' },
+          },
+        },
+        response: {
+          200: { type: 'object', properties: { success: { type: 'boolean' }, data: { type: 'object', additionalProperties: true }, meta: { $ref: 'response-meta#' } } },
+          404: { $ref: 'error-response#' },
+        },
+      },
+    },
+    async (request: FastifyRequest<{ Params: { auctionId: string } }>) => {
+      await enforceClientRateLimit(request.clientId, request.clientRateLimit);
+
+      // Try auction_item_data first (active auctions)
+      let rows = await postgrestSelect<{ auction_id: string; item_bytes: string }>({
+        table: 'auction_item_data',
+        query: { auction_id: `eq.${request.params.auctionId}` },
+        limit: 1,
+      }).catch(() => [] as Array<{ auction_id: string; item_bytes: string }>);
+
+      if (rows.length > 0) {
+        return {
+          success: true,
+          data: { auction_id: rows[0]!.auction_id, item_bytes: rows[0]!.item_bytes },
+          meta: { cached: false, cache_age_seconds: null, timestamp: Date.now() },
+        };
+      }
+
+      // Fall back to auction_history (completed auctions)
+      const historyRows = await postgrestSelect<{ auction_id: string; item_bytes: string | null }>({
+        table: 'auction_history',
+        query: { auction_id: `eq.${request.params.auctionId}` },
+        select: 'auction_id,item_bytes',
+        limit: 1,
+      }).catch(() => [] as Array<{ auction_id: string; item_bytes: string | null }>);
+
+      if (historyRows.length > 0 && historyRows[0]!.item_bytes) {
+        return {
+          success: true,
+          data: { auction_id: historyRows[0]!.auction_id, item_bytes: historyRows[0]!.item_bytes },
+          meta: { cached: false, cache_age_seconds: null, timestamp: Date.now() },
+        };
+      }
+
+      throw errors.validation(`No item data found for auction ${request.params.auctionId}.`);
+    },
+  );
 }
 
 interface HistoryQuery {

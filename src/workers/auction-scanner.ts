@@ -28,7 +28,6 @@ export interface TrackedAuction {
   tier: string;
   category: string;
   bin: boolean;
-  item_bytes: string;
   item_lore: string;
   extra: string;
 }
@@ -46,7 +45,6 @@ export interface AuctionItemData {
   ends_at: number;
   tier: string;
   category: string;
-  item_bytes: string;
   item_lore: string;
 }
 
@@ -142,7 +140,6 @@ function processNewAuction(auction: HypixelAuction, nameToId: Record<string, str
     tier: auction.tier,
     category: auction.category,
     bin: auction.bin,
-    item_bytes: auction.item_bytes,
     item_lore: auction.item_lore,
     extra: auction.extra,
   };
@@ -171,7 +168,7 @@ function buildLowestBins(): Map<string, LowestBinData> {
     const listings: AuctionItemData[] = auctions.slice(0, 20).map((a) => ({
       item_name: a.item_name, price: a.price, auction_id: a.auction_id,
       seller_uuid: a.seller_uuid, ends_at: a.ends_at, tier: a.tier, category: a.category,
-      item_bytes: a.item_bytes, item_lore: a.item_lore,
+      item_lore: a.item_lore,
     }));
     lowestBins.set(baseItem, {
       skyblock_id: auctions[0]!.skyblock_id, base_item: baseItem,
@@ -197,7 +194,7 @@ function toHistoryRow(auction: TrackedAuction, outcome: 'sold' | 'expired' | 'ca
     outcome,
     started_at: new Date(auction.starts_at).toISOString(),
     ended_at: new Date().toISOString(),
-    item_bytes: auction.item_bytes ?? null,
+    item_bytes: null, // Stored separately in auction_item_data table
     item_lore: auction.item_lore ?? null,
   };
 }
@@ -397,17 +394,30 @@ async function processActiveAuctions(_job: Job): Promise<void> {
 
   // Add new / update existing
   const newListings: TrackedAuction[] = [];
+  const newItemBytes: Array<{ auction_id: string; item_bytes: string }> = [];
   for (const auction of allRawAuctions) {
     const existing = allTracked.get(auction.uuid);
     if (!existing) {
       const tracked = processNewAuction(auction, nameToId);
       allTracked.set(auction.uuid, tracked);
       newListings.push(tracked);
+      if (auction.item_bytes) {
+        newItemBytes.push({ auction_id: auction.uuid, item_bytes: auction.item_bytes });
+      }
       addedCount++;
     } else if (!existing.bin && auction.highest_bid_amount > existing.highest_bid) {
       existing.highest_bid = auction.highest_bid_amount;
       existing.price = auction.highest_bid_amount;
       updatedCount++;
+    }
+  }
+
+  // Store item_bytes for new auctions in Postgres (too large for Redis)
+  if (newItemBytes.length > 0) {
+    try {
+      await postgrestInsert('auction_item_data', newItemBytes, 'auction_id');
+    } catch (err) {
+      log.error({ err }, 'Failed to insert auction item_bytes');
     }
   }
 
