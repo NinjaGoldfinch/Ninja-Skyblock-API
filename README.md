@@ -65,7 +65,8 @@ Requires Redis running on `localhost:6379`. Configure via `.env`.
 | GET | `/v1/skyblock/profile/:profileUuid` | SkyBlock profile by profile UUID |
 | GET | `/v1/skyblock/bazaar/:itemId` | Current bazaar product data |
 | GET | `/v1/skyblock/bazaar/:itemId/history` | Bazaar price history |
-| GET | `/v1/skyblock/auctions/lowest/:item` | Lowest BIN for an item |
+| GET | `/v1/skyblock/auctions/lowest/:item` | Lowest BIN for an item (by base name) |
+| GET | `/v1/skyblock/auctions/search?search=term` | Search auction items by name |
 
 ### Real-Time Events
 
