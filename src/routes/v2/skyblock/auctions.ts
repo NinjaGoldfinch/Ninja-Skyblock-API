@@ -48,6 +48,63 @@ async function searchAuctionCache(searchTerm: string): Promise<LowestBinData | n
 }
 
 export async function v2AuctionsRoute(app: FastifyInstance): Promise<void> {
+  // GET /v2/skyblock/auctions/lowest — all items with lowest BIN
+  app.get(
+    '/v2/skyblock/auctions/lowest',
+    {
+      schema: {
+        tags: ['auctions'],
+        summary: 'Get all lowest BIN prices',
+        description: 'Returns the lowest BIN listing for every item tracked by the auction scanner, sorted by base item name.',
+        response: {
+          200: {
+            type: 'object',
+            properties: {
+              success: { type: 'boolean', const: true },
+              data: { type: 'object', additionalProperties: true },
+              meta: { $ref: 'response-meta#' },
+            },
+          },
+          429: { $ref: 'error-response#' },
+        },
+      },
+    },
+    async (request: FastifyRequest) => {
+      await enforceClientRateLimit(request.clientId, request.clientRateLimit);
+
+      const redis = getRedis();
+      const items: Array<{ base_item: string; lowest_price: number; count: number }> = [];
+
+      let cursor = '0';
+      do {
+        const [nextCursor, keys] = await redis.scan(cursor, 'MATCH', 'cache:hot:auction-lowest:*', 'COUNT', 500);
+        cursor = nextCursor;
+
+        if (keys.length > 0) {
+          const values = await redis.mget(...keys);
+          for (let i = 0; i < keys.length; i++) {
+            const raw = values[i];
+            if (!raw) continue;
+            const entry = JSON.parse(raw) as { data: LowestBinData; cached_at: number };
+            items.push({
+              base_item: entry.data.base_item,
+              lowest_price: entry.data.lowest.price,
+              count: entry.data.count,
+            });
+          }
+        }
+      } while (cursor !== '0');
+
+      items.sort((a, b) => a.base_item.localeCompare(b.base_item));
+
+      return {
+        success: true,
+        data: { items, count: items.length },
+        meta: { cached: true, cache_age_seconds: null, timestamp: Date.now() },
+      };
+    },
+  );
+
   // GET /v2/skyblock/auctions/lowest/:item — lowest BIN for an item
   app.get<{ Params: AuctionParams }>(
     '/v2/skyblock/auctions/lowest/:item',
