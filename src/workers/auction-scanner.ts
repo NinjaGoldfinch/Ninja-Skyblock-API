@@ -15,18 +15,21 @@ const ENDING_SOON_WINDOW_MS = 120_000; // 2 minutes
 let lastModifiedHeader: string | undefined;
 
 // Known reforge prefixes to strip when extracting base item name
+// Only reforges that are NEVER real item name prefixes.
+// Many reforges (Perfect, Wise, Strong, Heavy, Giant, Fierce, Legendary,
+// Mythic, Epic, Necrotic, Reinforced) are also real item set names —
+// stripping them would corrupt item names. A proper fix requires an
+// item ID lookup table (noted in CLAUDE.md).
 const REFORGE_PREFIXES = [
   'Withered', 'Fabled', 'Heroic', 'Suspicious', 'Ancient', 'Titanic',
-  'Wise', 'Fierce', 'Legendary', 'Mythic', 'Epic', 'Heavy', 'Light',
-  'Lucky', 'Rapid', 'Fair', 'Sharp', 'Forceful', 'Strong', 'Hurtful',
-  'Keen', 'Spiritual', 'Odd', 'Rich', 'Gentle', 'Bizarre', 'Neat',
-  'Fast', 'Fine', 'Grand', 'Hasty', 'Clean', 'Deadly', 'Unreal',
+  'Lucky', 'Rapid', 'Forceful', 'Hurtful',
+  'Keen', 'Spiritual', 'Odd', 'Rich', 'Gentle', 'Bizarre',
+  'Hasty', 'Unreal',
   'Awkward', 'Spicy', 'Treacherous', 'Demonic', 'Salty', 'Silky',
-  'Bloody', 'Shaded', 'Sweet', 'Warped', 'Loving', 'Itchy',
+  'Bloody', 'Shaded', 'Warped', 'Loving', 'Itchy',
   'Ominous', 'Pleasant', 'Zealous', 'Godly', 'Superior',
-  'Renowned', 'Submerged', 'Perfect', 'Auspicious', 'Moil',
+  'Renowned', 'Submerged', 'Auspicious', 'Moil',
   'Toil', 'Blooming', 'Stellar', 'Jaded', 'Sighted',
-  'Shiny',
 ];
 
 export interface AuctionItemData {
