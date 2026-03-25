@@ -95,7 +95,7 @@ async function processBazaarJob(_job: Job): Promise<void> {
       const absDiff = Math.abs(data.instant_buy_price - previous.instant_buy_price);
       if (absDiff >= env.BAZAAR_ALERT_THRESHOLD) {
         const changePct = previous.instant_buy_price > 0
-          ? Math.round((absDiff / previous.instant_buy_price) * 10000) / 100
+          ? Math.round((absDiff / previous.instant_buy_price) * 1000000) / 10000
           : 0;
         await publish('bazaar:alerts', {
           type: 'bazaar:price_change',
