@@ -33,7 +33,10 @@ async function postgrestFetch<T>(path: string, init?: RequestInit): Promise<T> {
   }
 
   log.debug({ path, method: init?.method ?? 'GET', duration_ms: durationMs }, 'PostgREST request completed');
-  return response.json() as Promise<T>;
+
+  const text = await response.text();
+  if (!text) return undefined as T;
+  return JSON.parse(text) as T;
 }
 
 export async function postgrestSelect<T>(options: PostgrestQueryOptions): Promise<T[]> {
