@@ -369,7 +369,14 @@ async function processActiveAuctions(_job: Job): Promise<void> {
   collectPage(firstPage.auctions);
 
   updatesSinceFullScan++;
-  const isFullScan = updatesSinceFullScan >= FULL_SCAN_INTERVAL;
+
+  // Force full scan if too many new auctions appeared (> 1 page worth)
+  const newAuctionEstimate = firstPage.totalAuctions - allTracked.size - pendingAuctions.size;
+  const forceFullScan = newAuctionEstimate > 1000;
+  const isFullScan = updatesSinceFullScan >= FULL_SCAN_INTERVAL || forceFullScan;
+  if (forceFullScan) {
+    log.info({ estimated_new: newAuctionEstimate }, 'Forcing full scan — high new auction volume');
+  }
 
   let pagesSucceeded = 1;
   let fetchDuration = 0;
