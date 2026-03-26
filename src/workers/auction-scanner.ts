@@ -92,16 +92,13 @@ let previousLowestBins = new Map<string, LowestBinData>();
 
 // Dependency status
 let itemsAvailable = false;
-let needsReprocess = false; // True when auctions were tracked without item resolution
+let needsReprocess = false;
 
 // Last-modified headers
 let activeLastModified: string | undefined;
 let endedLastModified: string | undefined;
 
-// Full scan tracking — do a full scan every FULL_SCAN_INTERVAL updates
-// Between full scans, only fetch page 0 for new listings + use ended for removals
-const FULL_SCAN_INTERVAL = 5; // Every 5th data update
-let updatesSinceFullScan = FULL_SCAN_INTERVAL; // Force full scan on first run
+const FAST_PAGES = 5; // Pages 0-4 fetched in the fast pass
 
 // --- Helpers ---
 
@@ -366,252 +363,227 @@ async function processActiveAuctions(_job: Job): Promise<void> {
     }
   }
 
-  collectPage(firstPage.auctions);
+  // --- Helper: diff auctions against tracked state ---
+  function diffAuctions(rawAuctions: HypixelAuction[]): {
+    added: number; removed: number; updated: number;
+    newListings: TrackedAuction[];
+    newItemBytes: Array<{ auction_id: string; item_bytes: string }>;
+  } {
+    let added = 0;
+    let removed = 0;
+    let updated = 0;
+    const newListings: TrackedAuction[] = [];
+    const newItemBytes: Array<{ auction_id: string; item_bytes: string }> = [];
 
-  updatesSinceFullScan++;
+    for (const auction of rawAuctions) {
+      const existing = allTracked.get(auction.uuid);
+      if (!existing) {
+        const tracked = processNewAuction(auction, nameToId);
+        allTracked.set(auction.uuid, tracked);
+        newListings.push(tracked);
+        if (auction.item_bytes) {
+          newItemBytes.push({ auction_id: auction.uuid, item_bytes: auction.item_bytes });
+        }
+        added++;
+      } else if (!existing.bin && auction.highest_bid_amount > existing.highest_bid) {
+        existing.highest_bid = auction.highest_bid_amount;
+        existing.price = auction.highest_bid_amount;
+        updated++;
+      }
+    }
 
-  // Force full scan if too many new auctions appeared (> 1 page worth)
-  const newAuctionEstimate = firstPage.totalAuctions - allTracked.size - pendingAuctions.size;
-  const forceFullScan = newAuctionEstimate > 1000;
-  const isFullScan = updatesSinceFullScan >= FULL_SCAN_INTERVAL || forceFullScan;
-  if (forceFullScan) {
-    log.info({ estimated_new: newAuctionEstimate }, 'Forcing full scan — high new auction volume');
+    // Expire auctions past their end time
+    const expireNow = Date.now();
+    for (const [auctionId, auction] of allTracked) {
+      if (auction.ends_at < expireNow) {
+        pendingAuctions.set(auctionId, { auction, removed_at: expireNow });
+        allTracked.delete(auctionId);
+        removed++;
+      }
+    }
+
+    return { added, removed, updated, newListings, newItemBytes };
   }
 
-  let pagesSucceeded = 1;
-  let fetchDuration = 0;
-  let priorityDuration = 0;
+  async function storeItemBytes(items: Array<{ auction_id: string; item_bytes: string }>): Promise<void> {
+    if (items.length > 0) {
+      try {
+        await postgrestInsert('auction_item_data', items, 'auction_id');
+      } catch (err) {
+        log.error({ err }, 'Failed to insert auction item_bytes');
+      }
+    }
+  }
 
-  if (isFullScan) {
-    // Full scan — fetch all pages
-    updatesSinceFullScan = 0;
-    const totalRemaining = firstPage.totalPages - 1;
-    const PRIORITY_PAGES = 15;
-    const priorityCount = Math.min(PRIORITY_PAGES, totalRemaining);
-    const remainingCount = totalRemaining - priorityCount;
-    const fetchStart = Date.now();
+  // ============ FAST PASS: pages 0-9 ============
 
-    const priorityPromises = Array.from(
-      { length: priorityCount },
+  collectPage(firstPage.auctions);
+
+  const fastCount = Math.min(FAST_PAGES - 1, firstPage.totalPages - 1);
+  const fastStart = Date.now();
+
+  if (fastCount > 0) {
+    const fastPromises = Array.from(
+      { length: fastCount },
       (_, i) => fetchAuctionsPage(i + 1).catch((err) => {
         log.warn({ page: i + 1, err }, 'Failed to fetch auction page');
         return null;
       }),
     );
-    const priorityPages = await Promise.all(priorityPromises);
-    priorityDuration = Date.now() - fetchStart;
-    for (const p of priorityPages) { if (p?.success) { collectPage(p.auctions); pagesSucceeded++; } }
-
-    if (remainingCount > 0) {
-      const remainingPromises = Array.from(
-        { length: remainingCount },
-        (_, i) => fetchAuctionsPage(i + 1 + priorityCount).catch((err) => {
-          log.warn({ page: i + 1 + priorityCount, err }, 'Failed to fetch auction page');
-          return null;
-        }),
-      );
-      const remainingPages = await Promise.all(remainingPromises);
-      for (const p of remainingPages) { if (p?.success) { collectPage(p.auctions); pagesSucceeded++; } }
-    }
-
-    fetchDuration = Date.now() - fetchStart;
-  } else {
-    // Quick scan — page 0 only (already collected above)
-    fetchDuration = 0;
+    const fastPages = await Promise.all(fastPromises);
+    for (const p of fastPages) { if (p?.success) collectPage(p.auctions); }
   }
 
-  // --- Diff against tracked state ---
+  const fastDuration = Date.now() - fastStart;
 
-  const newAuctionIds = new Set(allRawAuctions.map((a) => a.uuid));
-  let addedCount = 0;
-  let removedCount = 0;
-  let updatedCount = 0;
+  // Diff, rebuild, cache, and log the fast pass
+  const fast = diffAuctions(allRawAuctions);
+  await storeItemBytes(fast.newItemBytes);
+  const { soldCount: fastSold, expiredCount: fastExpired } = await processEndedAuctions();
 
-  // Add new / update existing
-  const newListings: TrackedAuction[] = [];
-  const newItemBytes: Array<{ auction_id: string; item_bytes: string }> = [];
-  for (const auction of allRawAuctions) {
-    const existing = allTracked.get(auction.uuid);
-    if (!existing) {
-      const tracked = processNewAuction(auction, nameToId);
-      allTracked.set(auction.uuid, tracked);
-      newListings.push(tracked);
-      if (auction.item_bytes) {
-        newItemBytes.push({ auction_id: auction.uuid, item_bytes: auction.item_bytes });
+  rebuildViews();
+  const fastLowestBins = buildLowestBins();
+
+  // --- Helper: publish events, cache, and log for a pass ---
+  async function publishAndCache(
+    lowestBins: Map<string, LowestBinData>,
+    listings: TrackedAuction[],
+    passName: string,
+    added: number, removed: number, updated: number,
+    sold: number, expired: number, fetchMs: number,
+  ): Promise<number> {
+    let alerts = 0;
+
+    // New listing events
+    for (const listing of listings) {
+      await publish('auction:new-listing', {
+        type: 'auction:new-listing', auction_id: listing.auction_id,
+        skyblock_id: listing.skyblock_id, base_item: listing.base_item,
+        item_name: listing.item_name, price: listing.price,
+        seller_uuid: listing.seller_uuid, ends_at: listing.ends_at,
+        bin: listing.bin, tier: listing.tier, timestamp: Date.now(),
+      });
+    }
+
+    // Lowest BIN change events
+    for (const [baseItem, data] of lowestBins) {
+      const previous = previousLowestBins.get(baseItem);
+      if (previous && data.lowest.price !== previous.lowest.price) {
+        const changePct = previous.lowest.price > 0
+          ? Math.round(((data.lowest.price - previous.lowest.price) / previous.lowest.price) * 10000) / 100 : 0;
+        await publish('auction:lowest-bin-change', {
+          type: 'auction:lowest-bin-change', skyblock_id: data.skyblock_id,
+          base_item: baseItem, old_price: previous.lowest.price, new_price: data.lowest.price,
+          auction_id: data.lowest.auction_id, item_name: data.lowest.item_name,
+          change_pct: changePct, timestamp: Date.now(),
+        });
+        alerts++;
+        if (data.lowest.price < previous.lowest.price) {
+          await publish('auction:alerts', {
+            type: 'auction:new_lowest_bin', item_id: baseItem,
+            item_name: data.lowest.item_name, price: data.lowest.price,
+            auction_id: data.lowest.auction_id, timestamp: Date.now(),
+          });
+        }
       }
-      addedCount++;
-    } else if (!existing.bin && auction.highest_bid_amount > existing.highest_bid) {
-      existing.highest_bid = auction.highest_bid_amount;
-      existing.price = auction.highest_bid_amount;
-      updatedCount++;
     }
+
+    // Ending soon events
+    for (const auction of endingSoon) {
+      await publish('auction:ending', {
+        type: 'auction:ending_soon', item_id: extractBaseItem(auction.item_name),
+        item_name: auction.item_name,
+        price: auction.bin ? auction.starting_bid : auction.highest_bid_amount,
+        auction_id: auction.uuid, ends_at: auction.end, timestamp: Date.now(),
+      });
+    }
+
+    // Cache lowest BINs
+    const cacheEntries = Array.from(lowestBins.entries()).map(([b, d]) => ({ id: b, data: d }));
+    const skyblockIdEntries: Array<{ id: string; data: LowestBinData }> = [];
+    for (const data of lowestBins.values()) {
+      if (data.skyblock_id) skyblockIdEntries.push({ id: data.skyblock_id, data });
+    }
+    if (cacheEntries.length > 0) {
+      await cacheSetBulk('hot', 'auction-lowest', cacheEntries, firstPage.lastUpdated);
+      await cacheSetBulk('hot', 'auction-lowest-id', skyblockIdEntries, firstPage.lastUpdated);
+      await cacheSet('hot', 'auction-lowest-all', 'latest', Object.fromEntries(lowestBins), firstPage.lastUpdated);
+      const allById: Record<string, LowestBinData> = {};
+      for (const data of lowestBins.values()) { if (data.skyblock_id) allById[data.skyblock_id] = data; }
+      await cacheSet('hot', 'auction-lowest-all-by-id', 'latest', allById, firstPage.lastUpdated);
+    }
+
+    // Cache tracked state
+    await cacheSet('hot', 'auctions-active', 'latest', Object.fromEntries(allTracked), firstPage.lastUpdated);
+    await cacheSet('hot', 'auctions-pending', 'latest',
+      Object.fromEntries(Array.from(pendingAuctions.entries()).map(([id, p]) => [id, p.auction])),
+      firstPage.lastUpdated);
+
+    previousLowestBins = lowestBins;
+
+    const passMs = Date.now() - startTime;
+    const flags = itemsAvailable ? '' : ' [NO ITEM RESOLUTION]';
+    log.info(
+      `Auctions ${passName} | +${added} -${removed} ~${updated} | sold:${sold} expired:${expired} | tracked:${allTracked.size} (bin:${binAuctions.size} reg:${regularAuctions.size}) pending:${pendingAuctions.size} | items:${lowestBins.size} alerts:${alerts} | fetch:${fetchMs}ms total:${passMs}ms${flags}`,
+    );
+
+    return alerts;
   }
 
-  // Store item_bytes for new auctions in Postgres (too large for Redis)
-  if (newItemBytes.length > 0) {
-    try {
-      await postgrestInsert('auction_item_data', newItemBytes, 'auction_id');
-    } catch (err) {
-      log.error({ err }, 'Failed to insert auction item_bytes');
-    }
-  }
+  // Publish + cache fast pass results
+  await publishAndCache(fastLowestBins, fast.newListings, 'FAST',
+    fast.added, fast.removed, fast.updated, fastSold, fastExpired, fastDuration);
 
-  // Move removed auctions to pending
-  if (isFullScan) {
-    // Full scan: anything not in the API response is gone
+  // ============ REMAINING PASS: pages 5+ ============
+
+  const remainingCount = firstPage.totalPages - 1 - fastCount;
+  if (remainingCount > 0) {
+    const remainingRaw: HypixelAuction[] = [];
+    const remainStart = Date.now();
+
+    const remainingPromises = Array.from(
+      { length: remainingCount },
+      (_, i) => fetchAuctionsPage(i + 1 + fastCount).catch((err) => {
+        log.warn({ page: i + 1 + fastCount, err }, 'Failed to fetch auction page');
+        return null;
+      }),
+    );
+    const remainingPages = await Promise.all(remainingPromises);
+    for (const p of remainingPages) {
+      if (p?.success) {
+        for (const a of p.auctions) remainingRaw.push(a);
+      }
+    }
+
+    const remainDuration = Date.now() - remainStart;
+
+    // Diff remaining pages
+    const remain = diffAuctions(remainingRaw);
+    await storeItemBytes(remain.newItemBytes);
+
+    // Full diff: remove auctions not seen in any page
+    const allSeenIds = new Set([
+      ...allRawAuctions.map((a) => a.uuid),
+      ...remainingRaw.map((a) => a.uuid),
+    ]);
+    let fullRemoved = 0;
     for (const [auctionId, auction] of allTracked) {
-      if (!newAuctionIds.has(auctionId)) {
+      if (!allSeenIds.has(auctionId)) {
         pendingAuctions.set(auctionId, { auction, removed_at: Date.now() });
         allTracked.delete(auctionId);
-        removedCount++;
+        fullRemoved++;
       }
     }
+
+    const { soldCount: remainSold, expiredCount: remainExpired } = await processEndedAuctions();
+
+    rebuildViews();
+    const remainLowestBins = buildLowestBins();
+
+    await publishAndCache(remainLowestBins, remain.newListings, 'FULL',
+      remain.added, fullRemoved + remain.removed, remain.updated,
+      remainSold, remainExpired, remainDuration);
   }
-
-  // Both scan types: expire auctions past their end time
-  for (const [auctionId, auction] of allTracked) {
-    if (auction.ends_at < now) {
-      pendingAuctions.set(auctionId, { auction, removed_at: Date.now() });
-      allTracked.delete(auctionId);
-      removedCount++;
-    }
-  }
-
-  // --- Process ended auctions to resolve pending ---
-  const { soldCount, expiredCount } = await processEndedAuctions();
-
-  // Rebuild views + lowest BINs
-  rebuildViews();
-  const lowestBins = buildLowestBins();
-
-  // --- Publish events ---
-  let alertsPublished = 0;
-
-  // New listing events
-  for (const listing of newListings) {
-    await publish('auction:new-listing', {
-      type: 'auction:new-listing',
-      auction_id: listing.auction_id,
-      skyblock_id: listing.skyblock_id,
-      base_item: listing.base_item,
-      item_name: listing.item_name,
-      price: listing.price,
-      seller_uuid: listing.seller_uuid,
-      ends_at: listing.ends_at,
-      bin: listing.bin,
-      tier: listing.tier,
-      timestamp: Date.now(),
-    });
-  }
-
-  // Lowest BIN change events (both increases and decreases)
-  for (const [baseItem, data] of lowestBins) {
-    const previous = previousLowestBins.get(baseItem);
-    if (previous && data.lowest.price !== previous.lowest.price) {
-      const changePct = previous.lowest.price > 0
-        ? Math.round(((data.lowest.price - previous.lowest.price) / previous.lowest.price) * 10000) / 100
-        : 0;
-      await publish('auction:lowest-bin-change', {
-        type: 'auction:lowest-bin-change',
-        skyblock_id: data.skyblock_id,
-        base_item: baseItem,
-        old_price: previous.lowest.price,
-        new_price: data.lowest.price,
-        auction_id: data.lowest.auction_id,
-        item_name: data.lowest.item_name,
-        change_pct: changePct,
-        timestamp: Date.now(),
-      });
-      alertsPublished++;
-
-      // Also publish on the legacy channel for backwards compat
-      if (data.lowest.price < previous.lowest.price) {
-        await publish('auction:alerts', {
-          type: 'auction:new_lowest_bin',
-          item_id: baseItem,
-          item_name: data.lowest.item_name,
-          price: data.lowest.price,
-          auction_id: data.lowest.auction_id,
-          timestamp: Date.now(),
-        });
-      }
-    }
-  }
-
-  // Ending soon events
-  for (const auction of endingSoon) {
-    await publish('auction:ending', {
-      type: 'auction:ending_soon',
-      item_id: extractBaseItem(auction.item_name),
-      item_name: auction.item_name,
-      price: auction.bin ? auction.starting_bid : auction.highest_bid_amount,
-      auction_id: auction.uuid,
-      ends_at: auction.end,
-      timestamp: Date.now(),
-    });
-  }
-
-  // --- Cache ---
-  const cacheEntries = Array.from(lowestBins.entries()).map(([baseItem, data]) => ({ id: baseItem, data }));
-  const skyblockIdEntries: Array<{ id: string; data: LowestBinData }> = [];
-  let unmatchedCount = 0;
-  for (const data of lowestBins.values()) {
-    if (data.skyblock_id) skyblockIdEntries.push({ id: data.skyblock_id, data });
-    else unmatchedCount++;
-  }
-
-  if (cacheEntries.length > 0) {
-    await cacheSetBulk('hot', 'auction-lowest', cacheEntries, firstPage.lastUpdated);
-    await cacheSetBulk('hot', 'auction-lowest-id', skyblockIdEntries, firstPage.lastUpdated);
-    await cacheSet('hot', 'auction-lowest-all', 'latest', Object.fromEntries(lowestBins), firstPage.lastUpdated);
-    const allById: Record<string, LowestBinData> = {};
-    for (const data of lowestBins.values()) { if (data.skyblock_id) allById[data.skyblock_id] = data; }
-    await cacheSet('hot', 'auction-lowest-all-by-id', 'latest', allById, firstPage.lastUpdated);
-  }
-
-  // Cache full tracked state (active + pending) so API can serve it and it's recoverable
-  const trackedSnapshot = Object.fromEntries(allTracked);
-  await cacheSet('hot', 'auctions-active', 'latest', trackedSnapshot, firstPage.lastUpdated);
-
-  const pendingSnapshot = Object.fromEntries(
-    Array.from(pendingAuctions.entries()).map(([id, p]) => [id, p.auction]),
-  );
-  await cacheSet('hot', 'auctions-pending', 'latest', pendingSnapshot, firstPage.lastUpdated);
-
-  if (unmatchedCount > 0) log.debug({ unmatched_items: unmatchedCount }, 'Auction items without skyblock_id');
-
-  previousLowestBins = lowestBins;
-
-  const durationMs = Date.now() - startTime;
-
-  // Compact info line
-  const scanType = isFullScan ? 'FULL' : 'QUICK';
-  const statusFlags = itemsAvailable ? '' : ' [NO ITEM RESOLUTION]';
-  log.info(
-    `Auctions ${scanType} | +${addedCount} -${removedCount} ~${updatedCount} | sold:${soldCount} expired:${expiredCount} | tracked:${allTracked.size} (bin:${binAuctions.size} reg:${regularAuctions.size}) pending:${pendingAuctions.size} | items:${lowestBins.size} alerts:${alertsPublished} | ${durationMs}ms${statusFlags}`,
-  );
-
-  // Full details behind debug
-  log.debug({
-    total_api: firstPage.totalAuctions,
-    tracked: allTracked.size,
-    bin: binAuctions.size,
-    regular: regularAuctions.size,
-    pending: pendingAuctions.size,
-    added: addedCount,
-    removed: removedCount,
-    updated: updatedCount,
-    sold: soldCount,
-    expired: expiredCount,
-    pages: firstPage.totalPages,
-    priority_fetch_ms: priorityDuration,
-    pages_succeeded: pagesSucceeded,
-    fetch_duration_ms: fetchDuration,
-    unique_items: lowestBins.size,
-    ending_soon: endingSoon.length,
-    alerts_published: alertsPublished,
-    duration_ms: durationMs,
-  }, 'Auction scan details');
 }
 
 // --- Startup ---
