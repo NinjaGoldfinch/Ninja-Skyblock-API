@@ -98,6 +98,11 @@ let needsReprocess = false; // True when auctions were tracked without item reso
 let activeLastModified: string | undefined;
 let endedLastModified: string | undefined;
 
+// Full scan tracking — do a full scan every FULL_SCAN_INTERVAL updates
+// Between full scans, only fetch page 0 for new listings + use ended for removals
+const FULL_SCAN_INTERVAL = 5; // Every 5th data update
+let updatesSinceFullScan = FULL_SCAN_INTERVAL; // Force full scan on first run
+
 // --- Helpers ---
 
 function stripFormatting(itemName: string): string {
@@ -348,7 +353,6 @@ async function processActiveAuctions(_job: Job): Promise<void> {
     return;
   }
 
-  // Fetch ALL pages
   const allRawAuctions: HypixelAuction[] = [];
   const endingSoon: HypixelAuction[] = [];
   const now = Date.now();
@@ -364,37 +368,50 @@ async function processActiveAuctions(_job: Job): Promise<void> {
 
   collectPage(firstPage.auctions);
 
-  const totalRemaining = firstPage.totalPages - 1;
-  const PRIORITY_PAGES = 15;
-  const priorityCount = Math.min(PRIORITY_PAGES, totalRemaining);
-  const remainingCount = totalRemaining - priorityCount;
-  const fetchStart = Date.now();
+  updatesSinceFullScan++;
+  const isFullScan = updatesSinceFullScan >= FULL_SCAN_INTERVAL;
+
   let pagesSucceeded = 1;
+  let fetchDuration = 0;
+  let priorityDuration = 0;
 
-  const priorityPromises = Array.from(
-    { length: priorityCount },
-    (_, i) => fetchAuctionsPage(i + 1).catch((err) => {
-      log.warn({ page: i + 1, err }, 'Failed to fetch auction page');
-      return null;
-    }),
-  );
-  const priorityPages = await Promise.all(priorityPromises);
-  const priorityDuration = Date.now() - fetchStart;
-  for (const p of priorityPages) { if (p?.success) { collectPage(p.auctions); pagesSucceeded++; } }
+  if (isFullScan) {
+    // Full scan — fetch all pages
+    updatesSinceFullScan = 0;
+    const totalRemaining = firstPage.totalPages - 1;
+    const PRIORITY_PAGES = 15;
+    const priorityCount = Math.min(PRIORITY_PAGES, totalRemaining);
+    const remainingCount = totalRemaining - priorityCount;
+    const fetchStart = Date.now();
 
-  if (remainingCount > 0) {
-    const remainingPromises = Array.from(
-      { length: remainingCount },
-      (_, i) => fetchAuctionsPage(i + 1 + priorityCount).catch((err) => {
-        log.warn({ page: i + 1 + priorityCount, err }, 'Failed to fetch auction page');
+    const priorityPromises = Array.from(
+      { length: priorityCount },
+      (_, i) => fetchAuctionsPage(i + 1).catch((err) => {
+        log.warn({ page: i + 1, err }, 'Failed to fetch auction page');
         return null;
       }),
     );
-    const remainingPages = await Promise.all(remainingPromises);
-    for (const p of remainingPages) { if (p?.success) { collectPage(p.auctions); pagesSucceeded++; } }
-  }
+    const priorityPages = await Promise.all(priorityPromises);
+    priorityDuration = Date.now() - fetchStart;
+    for (const p of priorityPages) { if (p?.success) { collectPage(p.auctions); pagesSucceeded++; } }
 
-  const fetchDuration = Date.now() - fetchStart;
+    if (remainingCount > 0) {
+      const remainingPromises = Array.from(
+        { length: remainingCount },
+        (_, i) => fetchAuctionsPage(i + 1 + priorityCount).catch((err) => {
+          log.warn({ page: i + 1 + priorityCount, err }, 'Failed to fetch auction page');
+          return null;
+        }),
+      );
+      const remainingPages = await Promise.all(remainingPromises);
+      for (const p of remainingPages) { if (p?.success) { collectPage(p.auctions); pagesSucceeded++; } }
+    }
+
+    fetchDuration = Date.now() - fetchStart;
+  } else {
+    // Quick scan — page 0 only (already collected above)
+    fetchDuration = 0;
+  }
 
   // --- Diff against tracked state ---
 
@@ -432,9 +449,21 @@ async function processActiveAuctions(_job: Job): Promise<void> {
     }
   }
 
-  // Move removed auctions to pending (don't discard immediately)
+  // Move removed auctions to pending
+  if (isFullScan) {
+    // Full scan: anything not in the API response is gone
+    for (const [auctionId, auction] of allTracked) {
+      if (!newAuctionIds.has(auctionId)) {
+        pendingAuctions.set(auctionId, { auction, removed_at: Date.now() });
+        allTracked.delete(auctionId);
+        removedCount++;
+      }
+    }
+  }
+
+  // Both scan types: expire auctions past their end time
   for (const [auctionId, auction] of allTracked) {
-    if (!newAuctionIds.has(auctionId)) {
+    if (auction.ends_at < now) {
       pendingAuctions.set(auctionId, { auction, removed_at: Date.now() });
       allTracked.delete(auctionId);
       removedCount++;
@@ -548,10 +577,11 @@ async function processActiveAuctions(_job: Job): Promise<void> {
 
   const durationMs = Date.now() - startTime;
 
-  // Compact info line — just the changes that matter
+  // Compact info line
+  const scanType = isFullScan ? 'FULL' : 'QUICK';
   const statusFlags = itemsAvailable ? '' : ' [NO ITEM RESOLUTION]';
   log.info(
-    `Auctions | +${addedCount} -${removedCount} ~${updatedCount} | sold:${soldCount} expired:${expiredCount} | tracked:${allTracked.size} (bin:${binAuctions.size} reg:${regularAuctions.size}) pending:${pendingAuctions.size} | items:${lowestBins.size} alerts:${alertsPublished} | ${durationMs}ms${statusFlags}`,
+    `Auctions ${scanType} | +${addedCount} -${removedCount} ~${updatedCount} | sold:${soldCount} expired:${expiredCount} | tracked:${allTracked.size} (bin:${binAuctions.size} reg:${regularAuctions.size}) pending:${pendingAuctions.size} | items:${lowestBins.size} alerts:${alertsPublished} | ${durationMs}ms${statusFlags}`,
   );
 
   // Full details behind debug
