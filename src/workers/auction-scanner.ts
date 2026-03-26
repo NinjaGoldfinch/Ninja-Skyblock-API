@@ -363,14 +363,13 @@ async function processActiveAuctions(_job: Job): Promise<void> {
     }
   }
 
-  // --- Helper: diff auctions against tracked state ---
-  function diffAuctions(rawAuctions: HypixelAuction[]): {
-    added: number; removed: number; updated: number;
+  // --- Helper: add new auctions and update bids (no removals) ---
+  function addAndUpdate(rawAuctions: HypixelAuction[]): {
+    added: number; updated: number;
     newListings: TrackedAuction[];
     newItemBytes: Array<{ auction_id: string; item_bytes: string }>;
   } {
     let added = 0;
-    let removed = 0;
     let updated = 0;
     const newListings: TrackedAuction[] = [];
     const newItemBytes: Array<{ auction_id: string; item_bytes: string }> = [];
@@ -392,17 +391,23 @@ async function processActiveAuctions(_job: Job): Promise<void> {
       }
     }
 
-    // Expire auctions past their end time
+    return { added, updated, newListings, newItemBytes };
+  }
+
+  // --- Helper: expire past-end auctions and remove missing IDs ---
+  function removeStale(seenIds?: Set<string>): number {
+    let removed = 0;
     const expireNow = Date.now();
     for (const [auctionId, auction] of allTracked) {
-      if (auction.ends_at < expireNow) {
+      const expired = auction.ends_at < expireNow;
+      const missing = seenIds ? !seenIds.has(auctionId) : false;
+      if (expired || missing) {
         pendingAuctions.set(auctionId, { auction, removed_at: expireNow });
         allTracked.delete(auctionId);
         removed++;
       }
     }
-
-    return { added, removed, updated, newListings, newItemBytes };
+    return removed;
   }
 
   async function storeItemBytes(items: Array<{ auction_id: string; item_bytes: string }>): Promise<void> {
@@ -415,7 +420,7 @@ async function processActiveAuctions(_job: Job): Promise<void> {
     }
   }
 
-  // ============ FAST PASS: pages 0-9 ============
+  // ============ FAST PASS: pages 0-4 ============
 
   collectPage(firstPage.auctions);
 
@@ -436,11 +441,15 @@ async function processActiveAuctions(_job: Job): Promise<void> {
 
   const fastDuration = Date.now() - fastStart;
 
-  // Diff, rebuild, cache, and log the fast pass
-  const fast = diffAuctions(allRawAuctions);
+  // Add new auctions from fast pages
+  const fast = addAndUpdate(allRawAuctions);
   await storeItemBytes(fast.newItemBytes);
+
+  // Expire past-end auctions + process ended
+  const fastRemoved = removeStale();
   const { soldCount: fastSold, expiredCount: fastExpired } = await processEndedAuctions();
 
+  // Rebuild and publish once for fast pass
   rebuildViews();
   const fastLowestBins = buildLowestBins();
 
@@ -532,7 +541,7 @@ async function processActiveAuctions(_job: Job): Promise<void> {
 
   // Publish + cache fast pass results
   await publishAndCache(fastLowestBins, fast.newListings, 'FAST',
-    fast.added, fast.removed, fast.updated, fastSold, fastExpired, fastDuration);
+    fast.added, fastRemoved, fast.updated, fastSold, fastExpired, fastDuration);
 
   // ============ REMAINING PASS: pages 5+ ============
 
@@ -557,23 +566,16 @@ async function processActiveAuctions(_job: Job): Promise<void> {
 
     const remainDuration = Date.now() - remainStart;
 
-    // Diff remaining pages
-    const remain = diffAuctions(remainingRaw);
+    // Add new auctions from remaining pages
+    const remain = addAndUpdate(remainingRaw);
     await storeItemBytes(remain.newItemBytes);
 
-    // Full diff: remove auctions not seen in any page
+    // Full removal: expire past-end + remove anything not seen across all pages
     const allSeenIds = new Set([
       ...allRawAuctions.map((a) => a.uuid),
       ...remainingRaw.map((a) => a.uuid),
     ]);
-    let fullRemoved = 0;
-    for (const [auctionId, auction] of allTracked) {
-      if (!allSeenIds.has(auctionId)) {
-        pendingAuctions.set(auctionId, { auction, removed_at: Date.now() });
-        allTracked.delete(auctionId);
-        fullRemoved++;
-      }
-    }
+    const fullRemoved = removeStale(allSeenIds);
 
     const { soldCount: remainSold, expiredCount: remainExpired } = await processEndedAuctions();
 
@@ -581,7 +583,7 @@ async function processActiveAuctions(_job: Job): Promise<void> {
     const remainLowestBins = buildLowestBins();
 
     await publishAndCache(remainLowestBins, remain.newListings, 'FULL',
-      remain.added, fullRemoved + remain.removed, remain.updated,
+      remain.added, fullRemoved, remain.updated,
       remainSold, remainExpired, remainDuration);
   }
 }
