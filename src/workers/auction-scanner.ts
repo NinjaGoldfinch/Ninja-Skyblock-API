@@ -538,12 +538,35 @@ async function processActiveAuctions(_job: Job): Promise<void> {
       Object.fromEntries(Array.from(pendingAuctions.entries()).map(([id, p]) => [id, p.auction])),
       firstPage.lastUpdated);
 
+    // Compute lowest BIN diff stats
+    let lbChanged = 0;
+    let lbNew = 0;
+    let lbRemoved = 0;
+    const prevKeys = new Set(previousLowestBins.keys());
+    for (const [baseItem, data] of lowestBins) {
+      const prev = previousLowestBins.get(baseItem);
+      if (!prev) {
+        lbNew++;
+      } else if (data.lowest.price !== prev.lowest.price) {
+        lbChanged++;
+      }
+      prevKeys.delete(baseItem);
+    }
+    lbRemoved = prevKeys.size;
+    const lbTotal = lowestBins.size;
+    const lbChangedPct = lbTotal > 0 ? Math.round((lbChanged / lbTotal) * 10000) / 100 : 0;
+
     previousLowestBins = lowestBins;
+
+    // Compute auction change percentages
+    const totalTracked = allTracked.size + added; // approximate pre-change total
+    const addedPct = totalTracked > 0 ? Math.round((added / totalTracked) * 10000) / 100 : 0;
+    const removedPct = totalTracked > 0 ? Math.round((removed / totalTracked) * 10000) / 100 : 0;
 
     const passMs = Date.now() - startTime;
     const flags = itemsAvailable ? '' : ' [NO ITEM RESOLUTION]';
     log.info(
-      `Auctions ${passName} | +${added} -${removed} ~${updated} | sold:${sold} expired:${expired} | tracked:${allTracked.size} (bin:${binAuctions.size} reg:${regularAuctions.size}) pending:${pendingAuctions.size} | items:${lowestBins.size} alerts:${alerts} | fetch:${fetchMs}ms total:${passMs}ms${flags}`,
+      `Auctions ${passName} | +${added}(${addedPct}%) -${removed}(${removedPct}%) ~${updated} | sold:${sold} expired:${expired} | tracked:${allTracked.size} pending:${pendingAuctions.size} | LB: ${lbTotal} items, ${lbChanged} changed(${lbChangedPct}%), +${lbNew} -${lbRemoved} | fetch:${fetchMs}ms total:${passMs}ms${flags}`,
     );
 
     return alerts;
