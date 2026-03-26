@@ -220,21 +220,32 @@ async function processEndedAuctions(): Promise<{ soldCount: number; expiredCount
     recentlySoldIds.add(ended.auction_id);
   }
 
-  // Batch-fetch item_bytes for pending auctions from Postgres
-  const pendingIds = Array.from(pendingAuctions.keys());
+  // We'll fetch item_bytes per-auction when confirmed sold/expired
   const itemBytesMap = new Map<string, string>();
-  if (pendingIds.length > 0) {
+
+  // Collect auction IDs that are resolving this cycle
+  const resolvingIds: string[] = [];
+  const now = Date.now();
+
+  for (const [auctionId, pending] of pendingAuctions) {
+    if (recentlySoldIds.has(auctionId) || now - pending.removed_at > PENDING_TIMEOUT_MS) {
+      resolvingIds.push(auctionId);
+    }
+  }
+
+  // Batch-fetch item_bytes only for resolving auctions
+  if (resolvingIds.length > 0) {
     try {
       const rows = await postgrestSelect<{ auction_id: string; item_bytes: string }>({
         table: 'auction_item_data',
-        query: { auction_id: `in.(${pendingIds.join(',')})` },
+        query: { auction_id: `in.(${resolvingIds.join(',')})` },
         select: 'auction_id,item_bytes',
       });
       for (const row of rows) {
         itemBytesMap.set(row.auction_id, row.item_bytes);
       }
-    } catch {
-      // auction_item_data may not exist yet
+    } catch (err) {
+      log.warn({ err, count: resolvingIds.length }, 'Failed to fetch item_bytes for resolving auctions');
     }
   }
 
@@ -242,7 +253,6 @@ async function processEndedAuctions(): Promise<{ soldCount: number; expiredCount
   const historyRows: AuctionHistoryRow[] = [];
   let soldCount = 0;
   let expiredCount = 0;
-  const now = Date.now();
 
   for (const [auctionId, pending] of pendingAuctions) {
     if (recentlySoldIds.has(auctionId)) {
