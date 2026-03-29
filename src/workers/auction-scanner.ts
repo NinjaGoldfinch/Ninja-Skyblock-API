@@ -501,7 +501,7 @@ async function processActiveAuctions(): Promise<void> {
     listings: TrackedAuction[],
     passName: string,
     added: number, removed: number, updated: number,
-    sold: number, expired: number, fetchMs: number, fullPass: boolean,
+    fetchMs: number, fullPass: boolean,
   ): Promise<number> {
     let alerts = 0;
     const ts = Date.now();
@@ -612,7 +612,7 @@ async function processActiveAuctions(): Promise<void> {
     const passMs = Date.now() - startTime;
     const flags = itemsAvailable ? '' : ' [NO ITEM RESOLUTION]';
     log.info(
-      `Auctions ${passName} | +${added}(${addedPct}%) -${removed}(${removedPct}%) ~${updated} | sold:${sold} expired:${expired} | tracked:${allTracked.size} pending:${pendingAuctions.size} | LB: ${lbTotal} items, ${lbChanged} changed(${lbChangedPct}%), +${lbNew} -${lbRemoved} | fetch:${fetchMs}ms total:${passMs}ms${flags}`,
+      `Auctions ${passName} | +${added}(${addedPct}%) -${removed}(${removedPct}%) ~${updated} | tracked:${allTracked.size} pending:${pendingAuctions.size} | LB: ${lbTotal} items, ${lbChanged} changed(${lbChangedPct}%), +${lbNew} -${lbRemoved} | fetch:${fetchMs}ms total:${passMs}ms${flags}`,
     );
 
     return alerts;
@@ -620,7 +620,7 @@ async function processActiveAuctions(): Promise<void> {
 
   // Publish + cache fast pass results (lightweight — skip full tracked state)
   await publishAndCache(fastLowestBins, fast.newListings, 'FAST',
-    fast.added, fastRemoved, fast.updated, 0, 0, fastDuration, false);
+    fast.added, fastRemoved, fast.updated, fastDuration, false);
 
   // ============ REMAINING PASS: pages 5+ (already fetching in parallel) ============
 
@@ -651,7 +651,7 @@ async function processActiveAuctions(): Promise<void> {
 
     await publishAndCache(remainLowestBins, remain.newListings, 'FULL',
       remain.added, fullRemoved, remain.updated,
-      0, 0, remainDuration, true);
+      remainDuration, true);
   } else {
     // No remaining pages — nothing extra to do
   }
