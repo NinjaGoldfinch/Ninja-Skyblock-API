@@ -13,6 +13,11 @@ import { auctionsActiveRoute } from './routes/v1/skyblock/auctions-active.js';
 import { playerUuidRoute } from './routes/v1/player/uuid.js';
 import { playerUsernameRoute } from './routes/v1/player/username.js';
 import { resourcesRoute } from './routes/v1/skyblock/resources.js';
+import { museumRoute } from './routes/v1/skyblock/museum.js';
+import { gardenRoute } from './routes/v1/skyblock/garden.js';
+import { bingoRoute } from './routes/v1/skyblock/bingo.js';
+import { firesalesRoute } from './routes/v1/skyblock/firesales.js';
+import { newsRoute } from './routes/v1/skyblock/news.js';
 import { v2ProfileRoute } from './routes/v2/skyblock/profile.js';
 import { v2BazaarRoute } from './routes/v2/skyblock/bazaar.js';
 import { v2AuctionsRoute } from './routes/v2/skyblock/auctions.js';
@@ -28,6 +33,7 @@ import { specRoute } from './routes/v1/docs/spec.js';
 import { redocRoute } from './routes/v1/docs/redoc.js';
 
 const app = Fastify({
+  trustProxy: true,
   routerOptions: { ignoreTrailingSlash: true },
   logger: {
     level: env.LOG_LEVEL,
@@ -83,6 +89,11 @@ app.register(auctionsActiveRoute);
 app.register(playerUuidRoute);
 app.register(playerUsernameRoute);
 app.register(resourcesRoute);
+app.register(museumRoute);
+app.register(gardenRoute);
+app.register(bingoRoute);
+app.register(firesalesRoute);
+app.register(newsRoute);
 
 // v2 routes — computed/processed data
 app.register(v2ProfileRoute);
@@ -132,6 +143,8 @@ app.get('/v1/health', {
     collections: await cacheGet('warm', 'resources', 'collections').then((r) => !!r).catch(() => false),
     skills: await cacheGet('warm', 'resources', 'skills').then((r) => !!r).catch(() => false),
     election: await cacheGet('warm', 'resources', 'election').then((r) => !!r).catch(() => false),
+    firesales: await cacheGet('warm', 'firesales', 'latest').then((r) => !!r).catch(() => false),
+    news: await cacheGet('warm', 'news', 'latest').then((r) => !!r).catch(() => false),
   };
   const allHealthy = Object.values(checks).every(Boolean);
   return {
@@ -159,6 +172,16 @@ const start = async () => {
     process.exit(1);
   }
 };
+
+// Graceful shutdown
+for (const signal of ['SIGTERM', 'SIGINT'] as const) {
+  process.on(signal, async () => {
+    logger.info({ signal }, 'Received shutdown signal, closing server');
+    await app.close();
+    await closeRedis();
+    process.exit(0);
+  });
+}
 
 start();
 

@@ -1,23 +1,33 @@
-import type { Job } from 'bullmq';
-import { getQueue, createWorker } from '../utils/queue.js';
 import { fetchConditional } from '../services/hypixel-client.js';
-import { cacheSet, cacheSetBulk } from '../services/cache-manager.js';
-import { postgrestInsert } from '../services/postgrest-client.js';
-import { publish } from '../services/event-bus.js';
+import { cacheSetPipeline } from '../services/cache-manager.js';
+import type { CachePipelineEntry } from '../services/cache-manager.js';
+import { postgrestInsert, postgrestRpc } from '../services/postgrest-client.js';
+import { publishBatch } from '../services/event-bus.js';
+import type { EventChannel, EventPayload } from '../services/event-bus.js';
 import { env } from '../config/env.js';
 import type { HypixelBazaarProduct, HypixelBazaarResponse } from '../types/hypixel.js';
 import { createLogger } from '../utils/logger.js';
 
 const log = createLogger('bazaar-tracker');
-const QUEUE_NAME = 'bazaar-tracker';
 
 // In-memory state
 let previousSnapshot = new Map<string, BazaarProductData>();
 let lastModifiedHeader: string | undefined;
+let snapshotsSinceLastInsert = 0;
+const BAZAAR_INSERT_INTERVAL = 5; // Insert to Postgres every Nth update (skip unchanged cycles)
 
-interface RawSnapshotRow {
+interface SnapshotRow {
   item_id: string;
-  raw_data: Record<string, unknown>; // JSONB object — PostgREST serializes it
+  instant_buy: number;
+  instant_sell: number;
+  avg_buy: number;
+  avg_sell: number;
+  buy_volume: number;
+  sell_volume: number;
+  buy_orders: number;
+  sell_orders: number;
+  buy_moving_week: number;
+  sell_moving_week: number;
 }
 
 // Processed data for the warm cache and API responses
@@ -65,12 +75,12 @@ function transformProduct(productId: string, product: HypixelBazaarProduct): Baz
   };
 }
 
-async function processBazaarJob(_job: Job): Promise<void> {
+async function processBazaarJob(): Promise<void> {
   const startTime = Date.now();
 
   // Conditional fetch — skip processing if data hasn't changed
   const result = await fetchConditional<HypixelBazaarResponse>(
-    { endpoint: '/v2/skyblock/bazaar' },
+    { endpoint: '/v2/skyblock/bazaar', noApiKey: true },
     lastModifiedHeader,
   );
 
@@ -87,34 +97,51 @@ async function processBazaarJob(_job: Job): Promise<void> {
     return;
   }
 
+  const fetchMs = Date.now() - startTime;
+
   const products = Object.entries(response.products);
-  const snapshotRows: RawSnapshotRow[] = [];
-  const cacheEntries: Array<{ id: string; data: BazaarProductData }> = [];
-  const rawCacheEntries: Array<{ id: string; data: Record<string, unknown> }> = [];
+  const snapshotRows: SnapshotRow[] = [];
   const newSnapshot = new Map<string, BazaarProductData>();
+  const eventBatch: Array<{ channel: EventChannel; event: EventPayload }> = [];
   let alertsPublished = 0;
+  let newProducts = 0;
+
+  // --- Collect cache ops into a single pipeline ---
+  const lastUpdated = response.lastUpdated;
+  const cacheOps: CachePipelineEntry[] = [];
 
   for (const [productId, product] of products) {
     const data = transformProduct(productId, product);
     newSnapshot.set(productId, data);
-    cacheEntries.push({ id: productId, data });
-    rawCacheEntries.push({ id: productId, data: product as unknown as Record<string, unknown> });
 
-    // Store raw Hypixel data in Postgres
+    cacheOps.push({ tier: 'warm', resource: 'bazaar', id: productId, data, dataTimestamp: lastUpdated });
+    cacheOps.push({ tier: 'warm', resource: 'bazaar-raw', id: productId, data: product as unknown as Record<string, unknown>, dataTimestamp: lastUpdated });
+
     snapshotRows.push({
       item_id: productId,
-      raw_data: product as unknown as Record<string, unknown>,
+      instant_buy: data.instant_buy_price,
+      instant_sell: data.instant_sell_price,
+      avg_buy: data.avg_buy_price,
+      avg_sell: data.avg_sell_price,
+      buy_volume: data.buy_volume,
+      sell_volume: data.sell_volume,
+      buy_orders: data.buy_orders,
+      sell_orders: data.sell_orders,
+      buy_moving_week: data.buy_moving_week,
+      sell_moving_week: data.sell_moving_week,
     });
 
     // Compare against in-memory previous snapshot for alerts
     const previous = previousSnapshot.get(productId);
-    if (previous) {
+    if (!previous) {
+      newProducts++;
+    } else {
       const absDiff = Math.abs(data.instant_buy_price - previous.instant_buy_price);
       if (absDiff >= env.BAZAAR_ALERT_THRESHOLD) {
         const changePct = previous.instant_buy_price > 0
           ? Math.round((absDiff / previous.instant_buy_price) * 1000000) / 10000
           : 0;
-        await publish('bazaar:alerts', {
+        eventBatch.push({ channel: 'bazaar:alerts', event: {
           type: 'bazaar:price_change',
           item_id: productId,
           old_instant_buy_price: previous.instant_buy_price,
@@ -127,7 +154,7 @@ async function processBazaarJob(_job: Job): Promise<void> {
           new_avg_sell_price: data.avg_sell_price,
           change_pct: changePct,
           timestamp: Date.now(),
-        });
+        }});
         alertsPublished++;
       }
     }
@@ -136,39 +163,59 @@ async function processBazaarJob(_job: Job): Promise<void> {
   // Update in-memory snapshot for next poll
   previousSnapshot = newSnapshot;
 
-  // Bulk write processed + raw data to warm cache using Hypixel's lastUpdated
-  const lastUpdated = response.lastUpdated;
-  await cacheSetBulk('warm', 'bazaar', cacheEntries, lastUpdated);
-  await cacheSetBulk('warm', 'bazaar-raw', rawCacheEntries, lastUpdated);
+  // Full raw response as single key for bulk reads
+  cacheOps.push({ tier: 'warm', resource: 'bazaar-all', id: 'latest', data: response.products, dataTimestamp: lastUpdated });
 
-  // Store full raw response as single key for bulk reads
-  await cacheSet('warm', 'bazaar-all', 'latest', response.products, lastUpdated);
+  // Fire cache pipeline, event publishes, and Postgres insert concurrently
+  // Only insert to Postgres if there were alerts or on periodic interval (reduces DB load)
+  snapshotsSinceLastInsert++;
+  const shouldInsert = alertsPublished > 0 || snapshotsSinceLastInsert >= BAZAAR_INSERT_INTERVAL;
+  await Promise.all([
+    cacheSetPipeline(cacheOps),
+    eventBatch.length > 0 ? publishBatch(eventBatch) : undefined,
+    shouldInsert && snapshotRows.length > 0
+      ? postgrestInsert('bazaar_snapshots', snapshotRows)
+          .then(() => { snapshotsSinceLastInsert = 0; })
+          .catch((err) => log.error({ err }, 'Failed to insert bazaar snapshots'))
+      : undefined,
+  ]);
 
-  // Bulk insert raw snapshots into Postgres
-  if (snapshotRows.length > 0) {
-    try {
-      await postgrestInsert('bazaar_snapshots', snapshotRows);
-    } catch (err) {
-      log.error({ err }, 'Failed to insert bazaar snapshots into PostgREST');
-    }
-  }
-
-  const durationMs = Date.now() - startTime;
-  log.info(`Bazaar | products:${products.length} alerts:${alertsPublished} | ${durationMs}ms`);
+  const totalMs = Date.now() - startTime;
+  const newTag = newProducts > 0 ? ` +${newProducts} new` : '';
+  log.info(`Bazaar | products:${products.length}${newTag} alerts:${alertsPublished} | fetch:${fetchMs}ms total:${totalMs}ms`);
 }
 
 export function startBazaarTracker(): void {
-  const queue = getQueue(QUEUE_NAME);
-
-  // Poll every 1s — conditional fetch skips processing when data hasn't changed
-  queue.upsertJobScheduler(
-    'bazaar-poll',
-    { every: 1000 },
-    { name: 'bazaar-poll' },
-  );
-
-  createWorker(QUEUE_NAME, processBazaarJob);
+  let running = false;
 
   // Fetch immediately on startup
-  queue.add('bazaar-poll-immediate', {}, { priority: 1 });
+  void processBazaarJob().catch((err) => log.error({ err }, 'Initial bazaar fetch failed'));
+
+  // Poll every 1s with mutex to prevent overlapping runs
+  setInterval(async () => {
+    if (running) return;
+    running = true;
+    try {
+      await processBazaarJob();
+    } catch (err) {
+      log.error({ err }, 'Bazaar poll failed');
+    } finally {
+      running = false;
+    }
+  }, 1000);
+
+  // Hourly aggregation + retention (run every 10 minutes, offset by 30s to avoid poll contention)
+  setTimeout(() => {
+    void runAggregationAndRetention();
+    setInterval(() => void runAggregationAndRetention(), 10 * 60 * 1000);
+  }, 30_000);
+}
+
+async function runAggregationAndRetention(): Promise<void> {
+  try {
+    await postgrestRpc<void>('bazaar_aggregate_and_retain', {});
+    log.info('Bazaar aggregation + retention completed');
+  } catch (err) {
+    log.error({ err }, 'Bazaar aggregation + retention failed');
+  }
 }

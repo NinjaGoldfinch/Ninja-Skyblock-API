@@ -1763,13 +1763,17 @@ ninja-skyblock-api/
 │   │   ├── v1/
 │   │   │   ├── skyblock/
 │   │   │   │   ├── profile.ts      # GET /v1/skyblock/profile/:uuid
-│   │   │   │   ├── auctions.ts     # GET /v1/skyblock/auctions/*
+│   │   │   │   ├── profiles.ts     # GET /v1/skyblock/profiles/:uuid
 │   │   │   │   ├── bazaar.ts       # GET /v1/skyblock/bazaar/*
-│   │   │   │   ├── networth.ts     # GET /v1/skyblock/networth/:uuid
-│   │   │   │   ├── skills.ts       # GET /v1/skyblock/skills/:uuid
-│   │   │   │   ├── dungeons.ts     # GET /v1/skyblock/dungeons/:uuid
-│   │   │   │   ├── slayers.ts      # GET /v1/skyblock/slayers/:uuid
-│   │   │   │   └── collections.ts  # GET /v1/skyblock/collections/:uuid
+│   │   │   │   ├── player-auctions.ts # GET /v1/skyblock/auctions/player/:uuid
+│   │   │   │   ├── auctions-active.ts # GET /v1/skyblock/auctions/active + pending
+│   │   │   │   ├── auctions-ended.ts  # GET /v1/skyblock/auctions/ended
+│   │   │   │   ├── resources.ts    # GET /v1/skyblock/{collections,skills,items,election}
+│   │   │   │   ├── museum.ts       # GET /v1/skyblock/museum/:profileUuid
+│   │   │   │   ├── garden.ts       # GET /v1/skyblock/garden/:profileUuid
+│   │   │   │   ├── bingo.ts        # GET /v1/skyblock/bingo/:playerUuid + /goals
+│   │   │   │   ├── firesales.ts    # GET /v1/skyblock/firesales
+│   │   │   │   └── news.ts         # GET /v1/skyblock/news
 │   │   │   └── events/
 │   │   │       ├── stream.ts       # GET /v1/events/bazaar/stream (SSE)
 │   │   │       └── subscribe.ts    # WS  /v1/events/subscribe (WebSocket)

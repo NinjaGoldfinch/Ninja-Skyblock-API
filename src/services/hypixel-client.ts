@@ -3,10 +3,13 @@ import { env } from '../config/env.js';
 import { HYPIXEL_BASE_URL } from '../config/constants.js';
 import { errors } from '../utils/errors.js';
 import { createLogger } from '../utils/logger.js';
+import { parseJsonAsync } from '../utils/json-worker.js';
 import type {
   HypixelProfilesResponse, HypixelProfileResponse, HypixelBazaarResponse,
   HypixelAuctionsPageResponse, HypixelPlayerAuctionsResponse, HypixelEndedAuctionsResponse,
   HypixelCollectionsResponse, HypixelSkillsResponse, HypixelItemsResponse, HypixelElectionResponse,
+  HypixelMuseumResponse, HypixelGardenResponse, HypixelBingoResponse,
+  HypixelFireSalesResponse, HypixelNewsResponse, HypixelBingoGoalsResponse,
 } from '../types/hypixel.js';
 
 const log = createLogger('hypixel-client');
@@ -22,6 +25,10 @@ interface HypixelRequestOptions {
   endpoint: string;
   params?: Record<string, string>;
   logLevel?: 'debug' | 'trace';
+  /** Offload JSON parsing to a worker thread (useful for large responses) */
+  workerParse?: boolean;
+  /** Skip sending the API key (for public endpoints like bazaar, auctions, resources) */
+  noApiKey?: boolean;
 }
 
 const MAX_RETRIES = 3;
@@ -43,12 +50,14 @@ async function fetchHypixel<T>(options: HypixelRequestOptions): Promise<T> {
   const startTime = Date.now();
 
   for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
-    const response = await fetch(url.toString(), {
-      headers: {
-        'API-Key': env.HYPIXEL_API_KEY,
-        'Accept': 'application/json',
-      },
-    });
+    const headers: Record<string, string> = {
+      'Accept': 'application/json',
+    };
+    if (!options.noApiKey) {
+      headers['API-Key'] = env.HYPIXEL_API_KEY;
+    }
+
+    const response = await fetch(url.toString(), { headers });
 
     // 403 — invalid key, stop immediately
     if (response.status === 403) {
@@ -82,7 +91,9 @@ async function fetchHypixel<T>(options: HypixelRequestOptions): Promise<T> {
       throw errors.hypixelError(new Error(`Hypixel API returned ${response.status}: ${body}`));
     }
 
-    const data = await response.json() as T;
+    const data = options.workerParse
+      ? await response.text().then((text) => parseJsonAsync<T>(text))
+      : await response.json() as T;
     const level = options.logLevel ?? 'debug';
     log[level]({ endpoint: options.endpoint, params: options.params, duration_ms: Date.now() - startTime }, 'Hypixel API request completed');
     return data;
@@ -112,6 +123,7 @@ export async function fetchPlayerProfiles(playerUuid: string): Promise<HypixelPr
 export async function fetchBazaar(): Promise<HypixelBazaarResponse> {
   return fetchHypixel<HypixelBazaarResponse>({
     endpoint: '/v2/skyblock/bazaar',
+    noApiKey: true,
   });
 }
 
@@ -120,6 +132,8 @@ export async function fetchAuctionsPage(page: number): Promise<HypixelAuctionsPa
     endpoint: '/v2/skyblock/auctions',
     params: { page: String(page) },
     logLevel: 'trace',
+    workerParse: true,
+    noApiKey: true,
   });
 }
 
@@ -133,30 +147,77 @@ export async function fetchPlayerAuctions(playerUuid: string): Promise<HypixelPl
 export async function fetchEndedAuctions(): Promise<HypixelEndedAuctionsResponse> {
   return fetchHypixel<HypixelEndedAuctionsResponse>({
     endpoint: '/v2/skyblock/auctions_ended',
+    noApiKey: true,
   });
 }
 
 export async function fetchCollections(): Promise<HypixelCollectionsResponse> {
   return fetchHypixel<HypixelCollectionsResponse>({
     endpoint: '/v2/resources/skyblock/collections',
+    noApiKey: true,
   });
 }
 
 export async function fetchSkills(): Promise<HypixelSkillsResponse> {
   return fetchHypixel<HypixelSkillsResponse>({
     endpoint: '/v2/resources/skyblock/skills',
+    noApiKey: true,
   });
 }
 
 export async function fetchItems(): Promise<HypixelItemsResponse> {
   return fetchHypixel<HypixelItemsResponse>({
     endpoint: '/v2/resources/skyblock/items',
+    noApiKey: true,
   });
 }
 
 export async function fetchElection(): Promise<HypixelElectionResponse> {
   return fetchHypixel<HypixelElectionResponse>({
     endpoint: '/v2/resources/skyblock/election',
+    noApiKey: true,
+  });
+}
+
+export async function fetchMuseum(profileUuid: string): Promise<HypixelMuseumResponse> {
+  return fetchHypixel<HypixelMuseumResponse>({
+    endpoint: '/v2/skyblock/museum',
+    params: { profile: profileUuid },
+  });
+}
+
+export async function fetchGarden(profileUuid: string): Promise<HypixelGardenResponse> {
+  return fetchHypixel<HypixelGardenResponse>({
+    endpoint: '/v2/skyblock/garden',
+    params: { profile: profileUuid },
+  });
+}
+
+export async function fetchBingo(playerUuid: string): Promise<HypixelBingoResponse> {
+  return fetchHypixel<HypixelBingoResponse>({
+    endpoint: '/v2/skyblock/bingo',
+    params: { uuid: playerUuid },
+  });
+}
+
+export async function fetchFireSales(): Promise<HypixelFireSalesResponse> {
+  return fetchHypixel<HypixelFireSalesResponse>({
+    endpoint: '/v2/skyblock/firesales',
+    noApiKey: true,
+  });
+}
+
+export async function fetchNews(): Promise<HypixelNewsResponse> {
+  return fetchHypixel<HypixelNewsResponse>({
+    endpoint: '/v2/skyblock/news',
+    noApiKey: true,
+  });
+}
+
+export async function fetchBingoGoals(): Promise<HypixelBingoGoalsResponse> {
+  return fetchHypixel<HypixelBingoGoalsResponse>({
+    endpoint: '/v2/resources/skyblock/bingo',
+    noApiKey: true,
   });
 }
 
@@ -184,9 +245,11 @@ export async function fetchConditional<T>(
   }
 
   const headers: Record<string, string> = {
-    'API-Key': env.HYPIXEL_API_KEY,
     'Accept': 'application/json',
   };
+  if (!options.noApiKey) {
+    headers['API-Key'] = env.HYPIXEL_API_KEY;
+  }
   if (ifModifiedSince) {
     headers['If-Modified-Since'] = ifModifiedSince;
   }

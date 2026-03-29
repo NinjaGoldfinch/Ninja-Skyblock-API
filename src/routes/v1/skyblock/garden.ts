@@ -1,25 +1,24 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify';
-import { fetchProfile } from '../../../services/hypixel-client.js';
+import { fetchGarden } from '../../../services/hypixel-client.js';
 import { cacheGet, cacheSet } from '../../../services/cache-manager.js';
 import { enforceClientRateLimit } from '../../../services/rate-limiter.js';
 import { errors } from '../../../utils/errors.js';
-import type { HypixelSkyBlockProfile } from '../../../types/hypixel.js';
 import { createLogger } from '../../../utils/logger.js';
 
-const log = createLogger('route:profile');
+const log = createLogger('route:garden');
 
-interface ProfileParams {
+interface GardenParams {
   profileUuid: string;
 }
 
-export async function profileRoute(app: FastifyInstance): Promise<void> {
-  app.get<{ Params: ProfileParams }>(
-    '/v1/skyblock/profile/:profileUuid',
+export async function gardenRoute(app: FastifyInstance): Promise<void> {
+  app.get<{ Params: GardenParams }>(
+    '/v1/skyblock/garden/:profileUuid',
     {
       schema: {
         tags: ['skyblock'],
-        summary: 'Get raw SkyBlock profile',
-        description: 'Returns raw Hypixel profile data for a profile UUID. No processing or computed fields.',
+        summary: 'Get SkyBlock garden data',
+        description: 'Returns raw Hypixel garden data for a profile UUID.',
         params: {
           type: 'object',
           required: ['profileUuid'],
@@ -36,7 +35,7 @@ export async function profileRoute(app: FastifyInstance): Promise<void> {
             type: 'object',
             properties: {
               success: { type: 'boolean', const: true },
-              data: { type: 'object', additionalProperties: true, description: 'Raw Hypixel profile data.' },
+              data: { type: 'object', additionalProperties: true },
               meta: { $ref: 'response-meta#' },
             },
           },
@@ -45,12 +44,11 @@ export async function profileRoute(app: FastifyInstance): Promise<void> {
         },
       },
     },
-    async (request: FastifyRequest<{ Params: ProfileParams }>) => {
+    async (request: FastifyRequest<{ Params: GardenParams }>) => {
       const profileUuid = request.params.profileUuid.replaceAll('-', '');
       await enforceClientRateLimit(request.clientId, request.clientRateLimit);
 
-      // Cache check
-      const cached = await cacheGet<HypixelSkyBlockProfile>('hot', 'raw-profile', profileUuid);
+      const cached = await cacheGet<Record<string, unknown>>('hot', 'garden', profileUuid);
       if (cached && !cached.stale) {
         return {
           success: true,
@@ -60,7 +58,7 @@ export async function profileRoute(app: FastifyInstance): Promise<void> {
       }
 
       if (cached && cached.stale) {
-        fetchAndCache(profileUuid).catch((err) => log.error({ err }, 'Background profile refresh failed'));
+        fetchAndCacheGarden(profileUuid).catch((err) => log.error({ err }, 'Background garden refresh failed'));
         return {
           success: true,
           data: cached.data,
@@ -68,7 +66,7 @@ export async function profileRoute(app: FastifyInstance): Promise<void> {
         };
       }
 
-      const data = await fetchAndCache(profileUuid);
+      const data = await fetchAndCacheGarden(profileUuid);
       return {
         success: true,
         data,
@@ -78,11 +76,11 @@ export async function profileRoute(app: FastifyInstance): Promise<void> {
   );
 }
 
-async function fetchAndCache(profileUuid: string): Promise<HypixelSkyBlockProfile> {
-  const response = await fetchProfile(profileUuid);
-  if (!response.profile) {
-    throw errors.profileNotFound(profileUuid);
+async function fetchAndCacheGarden(profileUuid: string): Promise<Record<string, unknown>> {
+  const response = await fetchGarden(profileUuid);
+  if (!response.garden) {
+    throw errors.resourceNotFound('garden', profileUuid);
   }
-  await cacheSet('hot', 'raw-profile', profileUuid, response.profile);
-  return response.profile;
+  await cacheSet('hot', 'garden', profileUuid, response.garden);
+  return response.garden;
 }

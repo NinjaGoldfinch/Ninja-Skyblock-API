@@ -64,7 +64,7 @@ export async function v2ItemsRoute(app: FastifyInstance): Promise<void> {
 
     const item = cached.data.find((i) => i.id === itemId.toUpperCase());
     if (!item) {
-      throw new (await import('../../../utils/errors.js')).AppError('RESOURCE_NOT_FOUND', 404, `Item ${itemId} not found.`);
+      throw errors.resourceNotFound('item', itemId);
     }
 
     return {
@@ -103,7 +103,7 @@ export async function v2ItemsRoute(app: FastifyInstance): Promise<void> {
 
     const itemId = cached.data[name];
     if (!itemId) {
-      throw new (await import('../../../utils/errors.js')).AppError('RESOURCE_NOT_FOUND', 404, `No item found with name "${name}".`);
+      throw errors.resourceNotFound('item', name);
     }
 
     return {

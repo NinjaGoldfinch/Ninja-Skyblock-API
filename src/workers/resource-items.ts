@@ -26,7 +26,7 @@ export interface ProcessedItem {
 
 async function processJob(_job: Job): Promise<void> {
   const result = await fetchConditional<HypixelItemsResponse>(
-    { endpoint: '/v2/resources/skyblock/items' },
+    { endpoint: '/v2/resources/skyblock/items', noApiKey: true },
     lastModifiedHeader,
   );
 

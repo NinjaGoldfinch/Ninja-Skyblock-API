@@ -16,7 +16,7 @@ let lastTtlRefresh = 0;
 
 async function processJob(_job: Job): Promise<void> {
   const result = await fetchConditional<HypixelCollectionsResponse>(
-    { endpoint: '/v2/resources/skyblock/collections' },
+    { endpoint: '/v2/resources/skyblock/collections', noApiKey: true },
     lastModifiedHeader,
   );
 

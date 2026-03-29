@@ -86,6 +86,34 @@ export async function cacheSetBulk<T>(tier: CacheTier, resource: string, entries
   log.trace({ tier, resource, count: entries.length }, 'Bulk cache set');
 }
 
+export interface CachePipelineEntry {
+  tier: CacheTier;
+  resource: string;
+  id: string;
+  data: unknown;
+  dataTimestamp?: number;
+  /** Pre-serialized JSON string — skip JSON.stringify if provided */
+  rawJson?: string;
+}
+
+export async function cacheSetPipeline(entries: CachePipelineEntry[]): Promise<void> {
+  if (entries.length === 0) return;
+  const redis = getRedis();
+  const pipeline = redis.pipeline();
+  const now = Date.now();
+
+  for (const entry of entries) {
+    const key = buildKey(entry.tier, entry.resource, entry.id);
+    const ttl = getTtl(entry.tier);
+    const extendedTtl = ttl * STALE_MULTIPLIER;
+    const value = entry.rawJson ?? JSON.stringify({ data: entry.data, cached_at: entry.dataTimestamp ?? now });
+    pipeline.set(key, value, 'EX', extendedTtl);
+  }
+
+  await pipeline.exec();
+  log.trace({ count: entries.length }, 'Pipeline cache set');
+}
+
 export async function cacheRefreshTtl(tier: CacheTier, resource: string, id: string): Promise<void> {
   const redis = getRedis();
   const key = buildKey(tier, resource, id);

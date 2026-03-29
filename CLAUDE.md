@@ -62,6 +62,13 @@ All phases complete. Remaining: bazaar data retention (deferred), additional rou
 - [x] HTTP/2 + 100 concurrent connections via undici
 - [x] Cache timestamps use Hypixel's lastUpdated (not fetch time)
 - [x] Immediate data fetch on worker startup
+- [x] Bazaar data retention + hourly aggregation (Postgres function, 48h raw / 90d hourly)
+- [x] Bazaar snapshots migrated from JSONB to flat numeric columns
+- [x] Auction history endpoint with pagination, price/time/tier/BIN filters
+- [x] Recently sold auctions endpoint (from hot cache)
+- [x] v1 museum, garden, bingo, firesales, news endpoints
+- [x] Bingo goals resource endpoint (public)
+- [x] resourceNotFound error factory, graceful shutdown, background refresh logging
 
 ## What works
 - Step 1: `tsc --noEmit` passes, server boots with env vars set, exits cleanly on timeout
@@ -100,8 +107,6 @@ All phases complete. Remaining: bazaar data retention (deferred), additional rou
 
 ## Next step
 All core phases and "then" items complete. Remaining work:
-- Bazaar data retention job (deferred — storage strategy TBD)
-- Move bazaar history aggregation from Node to Postgres
-- Additional routes (dungeons, slayers, collections)
 - Full networth computation (NBT decoding + price lookups)
+- v2 computed routes for museum, garden, bingo (progression/completion)
 - Discord bot (separate client project)

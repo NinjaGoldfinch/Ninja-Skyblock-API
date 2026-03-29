@@ -1,13 +1,21 @@
--- Bazaar price snapshots (raw Hypixel data for future-proof storage)
+-- Bazaar price snapshots (flat numeric columns for efficient queries)
 CREATE TABLE IF NOT EXISTS bazaar_snapshots (
-  id            BIGSERIAL PRIMARY KEY,
-  item_id       TEXT NOT NULL,
-  raw_data      JSONB NOT NULL,
-  recorded_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  id               BIGSERIAL PRIMARY KEY,
+  item_id          TEXT NOT NULL,
+  instant_buy      DOUBLE PRECISION NOT NULL,
+  instant_sell     DOUBLE PRECISION NOT NULL,
+  avg_buy          DOUBLE PRECISION NOT NULL,
+  avg_sell         DOUBLE PRECISION NOT NULL,
+  buy_volume       DOUBLE PRECISION NOT NULL,
+  sell_volume      DOUBLE PRECISION NOT NULL,
+  buy_orders       INTEGER NOT NULL,
+  sell_orders      INTEGER NOT NULL,
+  buy_moving_week  DOUBLE PRECISION NOT NULL,
+  sell_moving_week DOUBLE PRECISION NOT NULL,
+  recorded_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 CREATE INDEX IF NOT EXISTS idx_bazaar_item_time ON bazaar_snapshots (item_id, recorded_at DESC);
-CREATE INDEX IF NOT EXISTS idx_bazaar_raw_gin ON bazaar_snapshots USING GIN (raw_data);
 
 -- Auction sale records
 CREATE TABLE IF NOT EXISTS auction_sales (

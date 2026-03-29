@@ -257,6 +257,47 @@ export async function v2AuctionsRoute(app: FastifyInstance): Promise<void> {
     },
   );
 
+  // GET /v2/skyblock/auctions/recently-sold — latest sold auctions from cache
+  app.get(
+    '/v2/skyblock/auctions/recently-sold',
+    {
+      schema: {
+        tags: ['auctions'],
+        summary: 'Get recently sold auctions',
+        description: 'Returns the most recently confirmed sold auctions from cache. Updated each scan cycle.',
+        response: {
+          200: {
+            type: 'object',
+            properties: {
+              success: { type: 'boolean', const: true },
+              data: { type: 'object', additionalProperties: true },
+              meta: { $ref: 'response-meta#' },
+            },
+          },
+          429: { $ref: 'error-response#' },
+        },
+      },
+    },
+    async (request) => {
+      await enforceClientRateLimit(request.clientId, request.clientRateLimit);
+
+      const cached = await cacheGet<AuctionHistoryRow[]>('hot', 'auctions-recently-sold', 'latest');
+      if (cached) {
+        return {
+          success: true,
+          data: { auctions: cached.data, count: cached.data.length },
+          meta: { cached: true, cache_age_seconds: cached.cache_age_seconds, timestamp: Date.now() },
+        };
+      }
+
+      return {
+        success: true,
+        data: { auctions: [], count: 0 },
+        meta: { cached: false, cache_age_seconds: null, timestamp: Date.now() },
+      };
+    },
+  );
+
   // GET /v2/skyblock/auctions/history — query completed auction history
   app.get<{ Querystring: HistoryQuery }>(
     '/v2/skyblock/auctions/history',
@@ -274,7 +315,14 @@ export async function v2AuctionsRoute(app: FastifyInstance): Promise<void> {
             seller_uuid: { type: 'string', description: 'Seller player UUID.' },
             buyer_uuid: { type: 'string', description: 'Buyer player UUID.' },
             outcome: { type: 'string', enum: ['sold', 'expired', 'cancelled'], description: 'Auction outcome.' },
+            bin: { type: 'boolean', description: 'Filter BIN-only auctions.' },
+            tier: { type: 'string', description: 'Item tier (e.g. LEGENDARY, MYTHIC).' },
+            min_price: { type: 'integer', minimum: 0, description: 'Minimum final price.' },
+            max_price: { type: 'integer', minimum: 0, description: 'Maximum final price.' },
+            since: { type: 'string', format: 'date-time', description: 'Only auctions ending after this ISO timestamp.' },
+            before: { type: 'string', format: 'date-time', description: 'Only auctions ending before this ISO timestamp.' },
             limit: { type: 'integer', minimum: 1, maximum: 500, default: 50, description: 'Max results.' },
+            offset: { type: 'integer', minimum: 0, default: 0, description: 'Offset for pagination.' },
           },
         },
         response: {
@@ -301,6 +349,33 @@ export async function v2AuctionsRoute(app: FastifyInstance): Promise<void> {
       if (q.seller_uuid) query['seller_uuid'] = `eq.${q.seller_uuid}`;
       if (q.buyer_uuid) query['buyer_uuid'] = `eq.${q.buyer_uuid}`;
       if (q.outcome) query['outcome'] = `eq.${q.outcome}`;
+      if (q.bin !== undefined) query['bin'] = `eq.${q.bin}`;
+      if (q.tier) query['tier'] = `eq.${q.tier}`;
+      if (q.min_price !== undefined) query['final_price'] = `gte.${q.min_price}`;
+      if (q.max_price !== undefined) {
+        // PostgREST supports multiple conditions on the same column via AND logic
+        // but not via duplicate keys — use a combined filter if both min and max are set
+        if (q.min_price !== undefined) {
+          query['and'] = `(final_price.gte.${q.min_price},final_price.lte.${q.max_price})`;
+          delete query['final_price'];
+        } else {
+          query['final_price'] = `lte.${q.max_price}`;
+        }
+      }
+      if (q.since) query['ended_at'] = `gte.${q.since}`;
+      if (q.before) {
+        if (q.since) {
+          const existing = query['and'];
+          const timeFilter = `(ended_at.gte.${q.since},ended_at.lte.${q.before})`;
+          query['and'] = existing ? `${existing},${timeFilter}` : timeFilter;
+          delete query['ended_at'];
+        } else {
+          query['ended_at'] = `lte.${q.before}`;
+        }
+      }
+
+      const limit = q.limit ?? 50;
+      const offset = q.offset ?? 0;
 
       let rows: AuctionHistoryRow[];
       try {
@@ -308,7 +383,8 @@ export async function v2AuctionsRoute(app: FastifyInstance): Promise<void> {
           table: 'auction_history',
           query,
           order: 'ended_at.desc',
-          limit: q.limit ?? 50,
+          limit,
+          offset,
         });
       } catch {
         rows = [];
@@ -316,7 +392,7 @@ export async function v2AuctionsRoute(app: FastifyInstance): Promise<void> {
 
       return {
         success: true,
-        data: { auctions: rows, count: rows.length },
+        data: { auctions: rows, count: rows.length, limit, offset },
         meta: { cached: false, cache_age_seconds: null, timestamp: Date.now() },
       };
     },
@@ -389,7 +465,14 @@ interface HistoryQuery {
   seller_uuid?: string;
   buyer_uuid?: string;
   outcome?: 'sold' | 'expired' | 'cancelled';
+  bin?: boolean;
+  tier?: string;
+  min_price?: number;
+  max_price?: number;
+  since?: string;
+  before?: string;
   limit?: number;
+  offset?: number;
 }
 
 interface AuctionHistoryRow {

@@ -206,6 +206,65 @@ export interface HypixelItemsResponse {
   }>;
 }
 
+export interface HypixelMuseumResponse {
+  success: boolean;
+  members: Record<string, {
+    items?: Record<string, unknown>;
+    special?: unknown[];
+  }>;
+}
+
+export interface HypixelGardenResponse {
+  success: boolean;
+  garden: Record<string, unknown> | null;
+}
+
+export interface HypixelBingoResponse {
+  success: boolean;
+  events: Array<{
+    key: number;
+    points: number;
+    completed_goals: string[];
+  }>;
+}
+
+export interface HypixelFireSalesResponse {
+  success: boolean;
+  sales: Array<{
+    item_id: string;
+    start: number;
+    end: number;
+    amount: number;
+    price: number;
+  }>;
+}
+
+export interface HypixelNewsResponse {
+  success: boolean;
+  items: Array<{
+    title: string;
+    link: string;
+    text: string;
+    item: {
+      material: string;
+      data?: number;
+    };
+  }>;
+}
+
+export interface HypixelBingoGoalsResponse {
+  success: boolean;
+  lastUpdated: number;
+  goals: Array<{
+    id: string;
+    name: string;
+    lore: string;
+    tiers?: number[];
+    progress?: number;
+    requiredAmount?: number;
+  }>;
+}
+
 export interface HypixelElectionResponse {
   success: boolean;
   lastUpdated: number;

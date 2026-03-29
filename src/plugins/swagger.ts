@@ -24,7 +24,7 @@ export const swaggerPlugin = fp(async (app: FastifyInstance) => {
         },
       ],
       tags: [
-        { name: 'skyblock', description: 'SkyBlock profile, skills, networth, and dungeon endpoints' },
+        { name: 'skyblock', description: 'SkyBlock profile, museum, garden, bingo, fire sales, news, resources, and collection endpoints' },
         { name: 'bazaar', description: 'Bazaar pricing, live data, and price history' },
         { name: 'auctions', description: 'Auction house lookups and lowest BIN tracking' },
         { name: 'events', description: 'Real-time event streams (SSE and WebSocket)' },

@@ -17,6 +17,8 @@ export const errors = {
     new AppError('PLAYER_NOT_FOUND', 404, `No SkyBlock profile found for player ${uuid}`),
   profileNotFound: (uuid: string) =>
     new AppError('PROFILE_NOT_FOUND', 404, `No SkyBlock profile found for player ${uuid}`),
+  resourceNotFound: (resource: string, id: string) =>
+    new AppError('RESOURCE_NOT_FOUND', 404, `No ${resource} data found for ${id}.`),
   rateLimited: () =>
     new AppError('RATE_LIMITED', 429, 'Rate limit exceeded. Try again shortly.'),
   unauthorized: (message = 'Missing or invalid authentication.') =>

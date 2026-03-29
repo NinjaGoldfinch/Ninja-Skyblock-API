@@ -16,7 +16,7 @@ let lastTtlRefresh = 0;
 
 async function processJob(_job: Job): Promise<void> {
   const result = await fetchConditional<HypixelSkillsResponse>(
-    { endpoint: '/v2/resources/skyblock/skills' },
+    { endpoint: '/v2/resources/skyblock/skills', noApiKey: true },
     lastModifiedHeader,
   );
 

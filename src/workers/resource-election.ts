@@ -16,7 +16,7 @@ let lastTtlRefresh = 0;
 
 async function processJob(_job: Job): Promise<void> {
   const result = await fetchConditional<HypixelElectionResponse>(
-    { endpoint: '/v2/resources/skyblock/election' },
+    { endpoint: '/v2/resources/skyblock/election', noApiKey: true },
     lastModifiedHeader,
   );
 

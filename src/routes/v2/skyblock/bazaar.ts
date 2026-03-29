@@ -4,7 +4,6 @@ import { enforceClientRateLimit } from '../../../services/rate-limiter.js';
 import { postgrestSelect } from '../../../services/postgrest-client.js';
 import { errors } from '../../../utils/errors.js';
 import type { BazaarProductData } from '../../../workers/bazaar-tracker.js';
-import type { HypixelBazaarProduct } from '../../../types/hypixel.js';
 
 interface BazaarParams {
   itemId: string;
@@ -14,10 +13,26 @@ interface HistoryQuery {
   range?: '1h' | '6h' | '24h' | '7d' | '30d';
 }
 
-interface RawSnapshotRow {
+interface SnapshotRow {
   item_id: string;
-  raw_data: HypixelBazaarProduct;
+  instant_buy: number;
+  instant_sell: number;
+  avg_buy: number;
+  avg_sell: number;
+  buy_volume: number;
+  sell_volume: number;
   recorded_at: string;
+}
+
+interface HourlyRow {
+  item_id: string;
+  bucket: string;
+  avg_instant_buy: number;
+  avg_instant_sell: number;
+  avg_buy: number;
+  avg_sell: number;
+  avg_buy_volume: number;
+  avg_sell_volume: number;
 }
 
 const RANGE_TO_INTERVAL: Record<string, string> = {
@@ -124,35 +139,72 @@ export async function v2BazaarRoute(app: FastifyInstance): Promise<void> {
 
       const interval = RANGE_TO_INTERVAL[range] ?? '24 hours';
       const resolution = RANGE_TO_RESOLUTION[range] ?? '5m';
+      const cutoff = new Date(Date.now() - parseDuration(interval)).toISOString();
 
-      let rows: RawSnapshotRow[];
-      try {
-        rows = await postgrestSelect<RawSnapshotRow>({
-          table: 'bazaar_snapshots',
-          query: {
-            item_id: `eq.${itemId}`,
-            recorded_at: `gte.${new Date(Date.now() - parseDuration(interval)).toISOString()}`,
-          },
-          order: 'recorded_at.asc',
-          select: 'item_id,raw_data,recorded_at',
-        });
-      } catch {
-        rows = [];
-      }
+      // Use hourly aggregates for 7d/30d, raw snapshots for shorter ranges
+      const useHourly = range === '7d' || range === '30d';
 
-      const datapoints = rows.map((row) => {
-        const raw = row.raw_data;
-        const qs = raw.quick_status;
-        return {
+      let datapoints: Array<{
+        timestamp: number;
+        instant_buy_price: number;
+        instant_sell_price: number;
+        avg_buy_price: number;
+        avg_sell_price: number;
+        buy_volume: number;
+        sell_volume: number;
+      }>;
+
+      if (useHourly) {
+        let rows: HourlyRow[];
+        try {
+          rows = await postgrestSelect<HourlyRow>({
+            table: 'bazaar_hourly',
+            query: {
+              item_id: `eq.${itemId}`,
+              bucket: `gte.${cutoff}`,
+            },
+            order: 'bucket.asc',
+            select: 'item_id,bucket,avg_instant_buy,avg_instant_sell,avg_buy,avg_sell,avg_buy_volume,avg_sell_volume',
+          });
+        } catch {
+          rows = [];
+        }
+
+        datapoints = rows.map((row) => ({
+          timestamp: new Date(row.bucket).getTime(),
+          instant_buy_price: row.avg_instant_buy,
+          instant_sell_price: row.avg_instant_sell,
+          avg_buy_price: row.avg_buy,
+          avg_sell_price: row.avg_sell,
+          buy_volume: row.avg_buy_volume,
+          sell_volume: row.avg_sell_volume,
+        }));
+      } else {
+        let rows: SnapshotRow[];
+        try {
+          rows = await postgrestSelect<SnapshotRow>({
+            table: 'bazaar_snapshots',
+            query: {
+              item_id: `eq.${itemId}`,
+              recorded_at: `gte.${cutoff}`,
+            },
+            order: 'recorded_at.asc',
+            select: 'item_id,instant_buy,instant_sell,avg_buy,avg_sell,buy_volume,sell_volume,recorded_at',
+          });
+        } catch {
+          rows = [];
+        }
+
+        datapoints = rows.map((row) => ({
           timestamp: new Date(row.recorded_at).getTime(),
-          instant_buy_price: raw.sell_summary?.[0]?.pricePerUnit ?? qs.buyPrice,
-          instant_sell_price: raw.buy_summary?.[0]?.pricePerUnit ?? qs.sellPrice,
-          avg_buy_price: qs.buyPrice,
-          avg_sell_price: qs.sellPrice,
-          buy_volume: qs.buyVolume,
-          sell_volume: qs.sellVolume,
-        };
-      });
+          instant_buy_price: row.instant_buy,
+          instant_sell_price: row.instant_sell,
+          avg_buy_price: row.avg_buy,
+          avg_sell_price: row.avg_sell,
+          buy_volume: row.buy_volume,
+          sell_volume: row.sell_volume,
+        }));
+      }
 
       const count = datapoints.length;
       const summary = count > 0 ? {

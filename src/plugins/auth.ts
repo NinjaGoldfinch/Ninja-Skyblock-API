@@ -7,6 +7,24 @@ import { validateApiKey } from '../services/api-key-manager.js';
 
 const MAX_TIMESTAMP_DRIFT_MS = 300_000; // 5 minutes
 
+// Routes accessible without authentication (public data endpoints)
+const PUBLIC_PREFIXES = [
+  '/v1/skyblock/bazaar',
+  '/v2/skyblock/bazaar',
+  '/v1/skyblock/auctions',
+  '/v2/skyblock/auctions',
+  '/v1/skyblock/resources',
+  '/v2/skyblock/items',
+  '/v1/skyblock/firesales',
+  '/v1/skyblock/news',
+  '/v1/skyblock/bingo/goals',
+  '/v1/docs',
+];
+
+function isPublicRoute(url: string): boolean {
+  return PUBLIC_PREFIXES.some((p) => url === p || url.startsWith(p + '/'));
+}
+
 declare module 'fastify' {
   interface FastifyRequest {
     clientId: string;
@@ -59,8 +77,9 @@ export const authPlugin = fp(async (app: FastifyInstance) => {
   app.decorateRequest('clientRateLimit', env.PUBLIC_RATE_LIMIT);
 
   app.addHook('onRequest', async (request) => {
-    // Skip auth for health check and SSE/WS endpoints
-    if (request.url === '/v1/health' || request.url.startsWith('/v1/events/')) {
+    // Routes that never require authentication
+    const url = request.url.split('?')[0];
+    if (url === '/v1/health' || url.startsWith('/v1/events/')) {
       request.clientId = 'anonymous';
       request.clientTier = 'anonymous';
       request.clientRateLimit = env.CLIENT_RATE_LIMIT;
@@ -95,6 +114,14 @@ export const authPlugin = fp(async (app: FastifyInstance) => {
       request.clientId = `apikey:${keyInfo.owner}`;
       request.clientTier = keyInfo.tier;
       request.clientRateLimit = keyInfo.rate_limit;
+      return;
+    }
+
+    // Public endpoints — no auth required, rate-limit by IP
+    if (isPublicRoute(url)) {
+      request.clientId = `ip:${request.ip}`;
+      request.clientTier = 'public';
+      request.clientRateLimit = env.PUBLIC_RATE_LIMIT;
       return;
     }
 

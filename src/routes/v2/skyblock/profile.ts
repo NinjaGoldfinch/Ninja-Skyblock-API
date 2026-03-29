@@ -8,6 +8,9 @@ import { computeNetworth } from '../../../processors/networth.js';
 import { SLAYER_XP_THRESHOLDS, DUNGEON_XP_THRESHOLDS } from '../../../config/constants.js';
 import type { SkyBlockProfile } from '../../../types/skyblock.js';
 import type { HypixelProfileResponse, HypixelProfileMember, HypixelSkyBlockProfile } from '../../../types/hypixel.js';
+import { createLogger } from '../../../utils/logger.js';
+
+const log = createLogger('route:v2-profile');
 
 interface ProfileParams {
   profileUuid: string;
@@ -135,7 +138,7 @@ export async function v2ProfileRoute(app: FastifyInstance): Promise<void> {
       }
 
       if (cached && cached.stale) {
-        fetchAndCache(profileUuid).catch(() => {});
+        fetchAndCache(profileUuid).catch((err) => log.error({ err }, 'Background v2 profile refresh failed'));
         return {
           success: true,
           data: cached.data,

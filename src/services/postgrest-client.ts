@@ -10,6 +10,7 @@ interface PostgrestQueryOptions {
   select?: string;
   order?: string;
   limit?: number;
+  offset?: number;
 }
 
 async function postgrestFetch<T>(path: string, init?: RequestInit): Promise<T> {
@@ -44,6 +45,7 @@ export async function postgrestSelect<T>(options: PostgrestQueryOptions): Promis
   if (options.select) params.set('select', options.select);
   if (options.order) params.set('order', options.order);
   if (options.limit) params.set('limit', String(options.limit));
+  if (options.offset) params.set('offset', String(options.offset));
   if (options.query) {
     for (const [key, value] of Object.entries(options.query)) {
       params.set(key, value);

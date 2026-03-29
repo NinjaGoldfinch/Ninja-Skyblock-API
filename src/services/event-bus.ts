@@ -137,6 +137,16 @@ export async function publish(channel: EventChannel, event: EventPayload): Promi
   await client.publish(channel, JSON.stringify(event));
 }
 
+export async function publishBatch(events: Array<{ channel: EventChannel; event: EventPayload }>): Promise<void> {
+  if (events.length === 0) return;
+  const client = getPubClient();
+  const pipeline = client.pipeline();
+  for (const { channel, event } of events) {
+    pipeline.publish(channel, JSON.stringify(event));
+  }
+  await pipeline.exec();
+}
+
 export async function subscribe(channel: EventChannel, handler: EventHandler): Promise<void> {
   const client = getSubClient();
   handlers.push(handler);
