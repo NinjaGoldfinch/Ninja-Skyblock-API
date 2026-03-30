@@ -1,4 +1,4 @@
-import type { FastifyInstance, FastifyRequest } from 'fastify';
+import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { cacheGet } from '../../../services/cache-manager.js';
 import { enforceClientRateLimit } from '../../../services/rate-limiter.js';
 import { postgrestSelect } from '../../../services/postgrest-client.js';
@@ -51,6 +51,14 @@ const RANGE_TO_RESOLUTION: Record<string, string> = {
   '30d': '1h',
 };
 
+const RANGE_TO_MAX_AGE: Record<string, number> = {
+  '1h': 10,    // near-live, 1-min resolution
+  '6h': 30,    // 1-min resolution
+  '24h': 60,   // 5-min resolution
+  '7d': 3600,  // hourly buckets
+  '30d': 3600, // hourly buckets
+};
+
 export async function v2BazaarRoute(app: FastifyInstance): Promise<void> {
   // GET /v2/skyblock/bazaar/:itemId — processed bazaar data
   app.get<{ Params: BazaarParams }>(
@@ -81,12 +89,13 @@ export async function v2BazaarRoute(app: FastifyInstance): Promise<void> {
         },
       },
     },
-    async (request: FastifyRequest<{ Params: BazaarParams }>) => {
+    async (request: FastifyRequest<{ Params: BazaarParams }>, reply: FastifyReply) => {
       const { itemId } = request.params;
       await enforceClientRateLimit(request.clientId, request.clientRateLimit);
 
       const cached = await cacheGet<BazaarProductData>('warm', 'bazaar', itemId);
       if (cached) {
+        void reply.header('Cache-Control', 'public, max-age=10');
         return {
           success: true,
           data: cached.data,
@@ -132,7 +141,7 @@ export async function v2BazaarRoute(app: FastifyInstance): Promise<void> {
         },
       },
     },
-    async (request: FastifyRequest<{ Params: BazaarParams; Querystring: HistoryQuery }>) => {
+    async (request: FastifyRequest<{ Params: BazaarParams; Querystring: HistoryQuery }>, reply: FastifyReply) => {
       const { itemId } = request.params;
       const range = request.query.range ?? '24h';
       await enforceClientRateLimit(request.clientId, request.clientRateLimit);
@@ -213,6 +222,21 @@ export async function v2BazaarRoute(app: FastifyInstance): Promise<void> {
         avg_buy: Math.round((datapoints.reduce((s, d) => s + d.avg_buy_price, 0) / count) * 100) / 100,
         avg_sell: Math.round((datapoints.reduce((s, d) => s + d.avg_sell_price, 0) / count) * 100) / 100,
       } : null;
+
+      // ETag based on item, range, and latest datapoint timestamp
+      const lastTs = count > 0 ? datapoints[count - 1]!.timestamp : 0;
+      const etag = `"bz-${itemId}-${range}-${lastTs}"`;
+
+      // Check If-None-Match — return 304 if data hasn't changed
+      const ifNoneMatch = request.headers['if-none-match'];
+      if (ifNoneMatch === etag) {
+        void reply.code(304);
+        return;
+      }
+
+      const maxAge = RANGE_TO_MAX_AGE[range] ?? 60;
+      void reply.header('Cache-Control', `public, max-age=${maxAge}`);
+      void reply.header('ETag', etag);
 
       return {
         success: true,
