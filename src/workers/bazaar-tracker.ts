@@ -1,5 +1,5 @@
 import { fetchConditional } from '../services/hypixel-client.js';
-import { cacheSetPipeline } from '../services/cache-manager.js';
+import { cacheGet, cacheSet, cacheSetPipeline } from '../services/cache-manager.js';
 import type { CachePipelineEntry } from '../services/cache-manager.js';
 import { postgrestInsert, postgrestRpc } from '../services/postgrest-client.js';
 import { publishBatch } from '../services/event-bus.js';
@@ -33,6 +33,7 @@ interface SnapshotRow {
 // Processed data for the warm cache and API responses
 export interface BazaarProductData {
   item_id: string;
+  display_name: string | null;  // Display name from items resource, null if not found
   instant_buy_price: number;   // cheapest sell order (what you pay to buy now)
   instant_sell_price: number;  // highest buy order (what you get selling now)
   avg_buy_price: number;       // weighted average from quick_status
@@ -47,11 +48,59 @@ export interface BazaarProductData {
   top_sell_orders: Array<{ amount: number; price_per_unit: number; orders: number }>;
 }
 
-function transformProduct(productId: string, product: HypixelBazaarProduct): BazaarProductData {
+const ROMAN_NUMERALS: Record<number, string> = { 1: 'I', 2: 'II', 3: 'III', 4: 'IV', 5: 'V', 6: 'VI', 7: 'VII', 8: 'VIII', 9: 'IX', 10: 'X' };
+
+/** Convert a SCREAMING_SNAKE_CASE product ID to a readable display name as a fallback. */
+export function formatProductId(productId: string): string {
+  let id = productId;
+
+  // ENCHANTMENT_ULTIMATE_CHIMERA_5 → "Chimera V"
+  // ENCHANTMENT_SHARPNESS_7 → "Sharpness VII"
+  if (id.startsWith('ENCHANTMENT_ULTIMATE_')) {
+    id = id.slice('ENCHANTMENT_ULTIMATE_'.length);
+    return formatWords(id, true);
+  }
+  if (id.startsWith('ENCHANTMENT_')) {
+    id = id.slice('ENCHANTMENT_'.length);
+    return formatWords(id, true);
+  }
+
+  // ESSENCE_DRAGON → "Dragon Essence"
+  if (id.startsWith('ESSENCE_')) {
+    const type = id.slice('ESSENCE_'.length);
+    return titleCase(type) + ' Essence';
+  }
+
+  return formatWords(id, false);
+}
+
+function formatWords(id: string, enchantment: boolean): string {
+  const parts = id.split('_');
+
+  const result = parts.map(titleCase);
+
+  // For enchantments, convert trailing number to roman numeral
+  if (enchantment && result.length > 0) {
+    const num = parseInt(parts[parts.length - 1]!);
+    if (!isNaN(num) && ROMAN_NUMERALS[num]) {
+      result[result.length - 1] = ROMAN_NUMERALS[num]!;
+    }
+  }
+
+  return result.join(' ');
+}
+
+function titleCase(word: string): string {
+  if (word.length === 0) return word;
+  return word.charAt(0).toUpperCase() + word.slice(1).toLowerCase();
+}
+
+function transformProduct(productId: string, product: HypixelBazaarProduct, idToName?: Record<string, string>): BazaarProductData {
   const qs = product.quick_status;
 
   return {
     item_id: productId,
+    display_name: idToName?.[productId] ?? formatProductId(productId),
     instant_buy_price: product.sell_summary[0]?.pricePerUnit ?? qs.buyPrice,
     instant_sell_price: product.buy_summary[0]?.pricePerUnit ?? qs.sellPrice,
     avg_buy_price: qs.buyPrice,
@@ -106,12 +155,16 @@ async function processBazaarJob(): Promise<void> {
   let alertsPublished = 0;
   let newProducts = 0;
 
+  // --- Fetch item name lookup for display_name enrichment ---
+  const idToNameCache = await cacheGet<Record<string, string>>('warm', 'resources', 'item-id-to-name');
+  const idToName = idToNameCache?.data;
+
   // --- Collect cache ops into a single pipeline ---
   const lastUpdated = response.lastUpdated;
   const cacheOps: CachePipelineEntry[] = [];
 
   for (const [productId, product] of products) {
-    const data = transformProduct(productId, product);
+    const data = transformProduct(productId, product, idToName);
     newSnapshot.set(productId, data);
 
     cacheOps.push({ tier: 'warm', resource: 'bazaar', id: productId, data, dataTimestamp: lastUpdated });
@@ -165,6 +218,10 @@ async function processBazaarJob(): Promise<void> {
 
   // Full raw response as single key for bulk reads
   cacheOps.push({ tier: 'warm', resource: 'bazaar-all', id: 'latest', data: response.products, dataTimestamp: lastUpdated });
+
+  // Cache bazaar product IDs for resource-items worker to set is_bazaar_sellable flags
+  const bazaarProductIds = Object.keys(response.products);
+  await cacheSet('warm', 'resources', 'bazaar-product-ids', bazaarProductIds, lastUpdated);
 
   // Fire cache pipeline, event publishes, and Postgres insert concurrently
   // Only insert to Postgres if there were alerts or on periodic interval (reduces DB load)

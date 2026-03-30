@@ -593,6 +593,17 @@ async function processActiveAuctions(): Promise<void> {
       cacheOps.push({ tier: 'hot', resource: 'auctions-pending', id: 'latest', data: null, rawJson: pendingJson });
     }
 
+    // Cache seen auction item IDs for resource-items worker to set is_auctionable flags
+    if (fullPass) {
+      const seenAuctionItems: string[] = [];
+      for (const auction of allTracked.values()) {
+        if (auction.skyblock_id) seenAuctionItems.push(auction.skyblock_id);
+      }
+      // Deduplicate
+      const uniqueItems = [...new Set(seenAuctionItems)];
+      cacheOps.push({ tier: 'warm', resource: 'resources', id: 'seen-auction-items', data: uniqueItems, dataTimestamp: firstPage.lastUpdated });
+    }
+
     // --- Fire publish + cache concurrently (independent I/O) ---
     await Promise.all([
       publishBatch(eventBatch),
