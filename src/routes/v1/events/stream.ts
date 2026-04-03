@@ -23,14 +23,30 @@ function createSSEStream(
     }
   }
 
+  // Explicit OPTIONS handler for CORS preflight (SSE bypasses Fastify's CORS plugin via hijack)
+  app.options(path, {}, async (request: FastifyRequest, reply: FastifyReply) => {
+    const origin = request.headers.origin ?? '*';
+    void reply
+      .header('Access-Control-Allow-Origin', origin)
+      .header('Access-Control-Allow-Methods', 'GET, OPTIONS')
+      .header('Access-Control-Allow-Headers', 'Content-Type, Authorization')
+      .header('Access-Control-Allow-Credentials', 'true')
+      .header('Access-Control-Max-Age', '86400')
+      .code(204)
+      .send();
+  });
+
   app.get(path, {}, async (request: FastifyRequest, reply: FastifyReply) => {
     await ensureSubscribed();
 
+    const origin = request.headers.origin ?? '*';
     reply.raw.writeHead(200, {
       'Content-Type': 'text/event-stream',
       'Cache-Control': 'no-cache',
       'Connection': 'keep-alive',
       'X-Accel-Buffering': 'no',
+      'Access-Control-Allow-Origin': origin,
+      'Access-Control-Allow-Credentials': 'true',
     });
 
     reply.raw.write(':ok\n\n');
@@ -62,6 +78,9 @@ export async function sseRoute(app: FastifyInstance): Promise<void> {
 
   // New listings only
   createSSEStream(app, '/v1/events/auctions/listings', ['auction:new-listing']);
+
+  // Auction price snapshots (for real-time chart updates)
+  createSSEStream(app, '/v1/events/auctions/prices', ['auction:price-updates']);
 
   // Profile changes
   createSSEStream(app, '/v1/events/profiles/stream', ['profile:changes']);

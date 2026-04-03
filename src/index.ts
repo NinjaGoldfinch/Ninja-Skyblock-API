@@ -1,4 +1,5 @@
 import Fastify from 'fastify';
+import cors from '@fastify/cors';
 import { env } from './config/env.js';
 import { AppError } from './utils/errors.js';
 import { closeRedis } from './utils/redis.js';
@@ -42,6 +43,8 @@ const app = Fastify({
       : undefined,
   },
 });
+
+await app.register(cors, { origin: true });
 
 // Global error handler
 app.setErrorHandler((error, _request, reply) => {
@@ -127,6 +130,11 @@ app.get('/v1/health', {
             type: 'object',
             properties: {
               status: { type: 'string', description: 'Service status.' },
+              services: {
+                type: 'object',
+                additionalProperties: { type: 'boolean' },
+                description: 'Individual service health checks.',
+              },
             },
           },
           meta: { $ref: 'response-meta#' },

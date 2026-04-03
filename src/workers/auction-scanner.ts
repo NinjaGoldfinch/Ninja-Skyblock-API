@@ -1,7 +1,7 @@
 import { fetchAuctionsPage, fetchConditional } from '../services/hypixel-client.js';
 import { cacheGet, cacheSet, cacheSetPipeline } from '../services/cache-manager.js';
 import type { CachePipelineEntry } from '../services/cache-manager.js';
-import { postgrestInsert, postgrestSelect } from '../services/postgrest-client.js';
+import { postgrestInsert, postgrestSelect, postgrestRpc } from '../services/postgrest-client.js';
 import { publishBatch } from '../services/event-bus.js';
 import type { EventChannel, EventPayload } from '../services/event-bus.js';
 import { createLogger } from '../utils/logger.js';
@@ -12,6 +12,7 @@ const log = createLogger('auction-scanner');
 
 const ENDING_SOON_WINDOW_MS = 120_000;   // 2 minutes
 const PENDING_TIMEOUT_MS = 1_800_000;    // 30 minutes — generous timeout before marking expired
+// Snapshot insertion is event-driven: fires on every full pass when Hypixel data changes
 
 // --- Types ---
 
@@ -76,6 +77,7 @@ interface AuctionHistoryRow {
 // --- In-memory state ---
 
 let knownItemNames: Set<string> = new Set();
+let knownItemIds: Set<string> = new Set();
 let lastItemNamesCacheAge: number | null = null;
 
 // Active auctions
@@ -91,6 +93,9 @@ const recentlySoldIds = new Set<string>();
 
 // Previous lowest BINs for alerts
 let previousLowestBins = new Map<string, LowestBinData>();
+
+// Sparse storage: track previous snapshot fingerprint per item to skip unchanged rows
+const previousSnapshotFingerprints = new Map<string, string>();
 
 // Dependency status
 let itemsAvailable = false;
@@ -110,10 +115,16 @@ const notifiedEndingSoon = new Set<string>();
 
 function stripFormatting(itemName: string): string {
   let name = itemName;
-  name = name.replace(/^[^\w[]+/, '');
+  // Strip bracket prefixes first: [Lvl 100], [5✪], etc.
   name = name.replace(/^\[Lvl \d+\]\s*/, '');
   name = name.replace(/^\[\d+[^\]]*\]\s*/, '');
-  name = name.replace(/[\s✪✦➊➋➌➍➎⚚]+$/g, '').trim();
+  // Now strip leading non-word chars (⚚ gemstone, ✦ pet skin, ◆ runes, etc.)
+  name = name.replace(/^[^\w]+/, '');
+  // Strip trailing stars, symbols, and whitespace
+  name = name.replace(/[\s✪✦➊➋➌➍➎⚚◆]+$/g, '').trim();
+  // Strip edition numbers (#47, etc.)
+  name = name.replace(/\s*#\d+$/, '');
+  // Strip "Shiny " cosmetic prefix
   if (name.startsWith('Shiny ')) name = name.slice(6);
   return name.trim();
 }
@@ -129,12 +140,44 @@ function extractBaseItem(itemName: string): string {
   return stripped;
 }
 
+/**
+ * Resolve skyblock_id from multiple sources:
+ * 1. Direct name→id lookup (most items)
+ * 2. Derive SCREAMING_SNAKE_CASE from base item name, validate against known IDs
+ * 3. Parse the auction `extra` field which contains the internal item ID
+ */
+function resolveSkyblockId(baseItem: string, extra: string, nameToId: Record<string, string>): string | null {
+  // 1. Direct lookup — covers most items from Hypixel's items resource
+  const direct = nameToId[baseItem];
+  if (direct) return direct;
+
+  // 2. Derive from name: "Baby Yeti" → "BABY_YETI", validate it exists
+  const derived = baseItem.toUpperCase().replace(/ /g, '_').replace(/[^A-Z0-9_]/g, '');
+  if (derived && knownItemIds.has(derived)) return derived;
+
+  // 3. Parse `extra` field — format is typically "item_id_here other descriptors"
+  // e.g. "HYPERION Wither Sword" or "PET_SKIN_DRAGON_NEON_BLUE"
+  if (extra) {
+    // The first space-separated token in extra is often the internal ID
+    const firstToken = extra.split(' ')[0];
+    if (firstToken && knownItemIds.has(firstToken)) return firstToken;
+    // For pets, extra may contain the pet type (e.g. "BABY_YETI")
+    const upperExtra = extra.toUpperCase().replace(/ /g, '_').replace(/[^A-Z0-9_;]/g, '');
+    if (upperExtra && knownItemIds.has(upperExtra)) return upperExtra;
+  }
+
+  // 4. Fallback: use derived ID even if not in known set (items not in resource still deserve an ID)
+  if (derived) return derived;
+
+  return null;
+}
+
 function processNewAuction(auction: HypixelAuction, nameToId: Record<string, string>): TrackedAuction {
   const baseItem = extractBaseItem(auction.item_name);
   return {
     auction_id: auction.uuid,
     base_item: baseItem,
-    skyblock_id: nameToId[baseItem] ?? null,
+    skyblock_id: resolveSkyblockId(baseItem, auction.extra, nameToId),
     item_name: auction.item_name,
     price: auction.bin ? auction.starting_bid : auction.highest_bid_amount,
     starting_bid: auction.starting_bid,
@@ -174,12 +217,82 @@ function buildLowestBins(): Map<string, LowestBinData> {
       item_name: a.item_name, price: a.price, auction_id: a.auction_id,
       seller_uuid: a.seller_uuid, ends_at: a.ends_at, tier: a.tier, category: a.category,
     }));
+    // Pick the first non-null skyblock_id from the group
+    const skyblockId = auctions.find((a) => a.skyblock_id)?.skyblock_id ?? null;
     lowestBins.set(baseItem, {
-      skyblock_id: auctions[0]!.skyblock_id, base_item: baseItem,
+      skyblock_id: skyblockId, base_item: baseItem,
       lowest: listings[0]!, listings, count: auctions.length,
     });
   }
   return lowestBins;
+}
+
+// --- Price snapshot helpers ---
+
+interface AuctionPriceSnapshotRow {
+  base_item: string;
+  skyblock_id: string | null;
+  lowest_bin: number;
+  median_bin: number | null;
+  listing_count: number;
+  sale_count: number;
+  avg_sale_price: number | null;
+}
+
+function snapshotFingerprint(lowestBin: number, medianBin: number | null, listingCount: number): string {
+  return `${lowestBin}|${medianBin}|${listingCount}`;
+}
+
+function buildPriceSnapshotRows(lowestBins: Map<string, LowestBinData>): AuctionPriceSnapshotRow[] {
+  const rows: AuctionPriceSnapshotRow[] = [];
+  for (const data of lowestBins.values()) {
+    const prices = data.listings.map((l) => l.price);
+    const median = prices.length >= 2 ? prices[Math.floor(prices.length / 2)]! : null;
+
+    // Sparse: skip if nothing changed
+    const fp = snapshotFingerprint(data.lowest.price, median, data.count);
+    if (previousSnapshotFingerprints.get(data.base_item) === fp) continue;
+    previousSnapshotFingerprints.set(data.base_item, fp);
+
+    rows.push({
+      base_item: data.base_item,
+      skyblock_id: data.skyblock_id,
+      lowest_bin: data.lowest.price,
+      median_bin: median,
+      listing_count: data.count,
+      sale_count: 0,
+      avg_sale_price: null,
+    });
+  }
+  return rows;
+}
+
+async function enrichWithSaleData(rows: AuctionPriceSnapshotRow[], sinceSec: number): Promise<void> {
+  const cutoff = new Date(Date.now() - sinceSec * 1000).toISOString();
+  try {
+    const stats = await postgrestRpc<Array<{ base_item: string; sale_count: number; avg_sale_price: number }>>(
+      'auction_recent_sale_stats', { p_since: cutoff },
+    );
+    const map = new Map(stats.map((s) => [s.base_item, s]));
+    for (const row of rows) {
+      const s = map.get(row.base_item);
+      if (s) {
+        row.sale_count = s.sale_count;
+        row.avg_sale_price = s.avg_sale_price;
+      }
+    }
+  } catch (err) {
+    log.warn({ err }, 'Failed to enrich price snapshots with sale data');
+  }
+}
+
+async function runAuctionAggregation(): Promise<void> {
+  try {
+    await postgrestRpc<void>('auction_price_aggregate_and_retain', {});
+    log.info('Auction price aggregation + retention completed');
+  } catch (err) {
+    log.error({ err }, 'Auction price aggregation + retention failed');
+  }
 }
 
 function toHistoryRow(auction: TrackedAuction, outcome: 'sold' | 'expired' | 'cancelled', buyerUuid: string | null, finalPrice: number, itemBytes: string | null): AuctionHistoryRow {
@@ -333,11 +446,13 @@ async function processActiveAuctions(): Promise<void> {
   // On startup, items worker may not have written yet — retry once after a short delay
   let itemNamesCache = await cacheGet<string[]>('warm', 'resources', 'item-known-names');
   let nameToIdCache = await cacheGet<Record<string, string>>('warm', 'resources', 'item-name-to-id');
+  let idToNameCache = await cacheGet<Record<string, string>>('warm', 'resources', 'item-id-to-name');
 
   if (!itemNamesCache && !itemsAvailable) {
     await new Promise((r) => setTimeout(r, 3000));
     itemNamesCache = await cacheGet<string[]>('warm', 'resources', 'item-known-names');
     nameToIdCache = await cacheGet<Record<string, string>>('warm', 'resources', 'item-name-to-id');
+    idToNameCache = await cacheGet<Record<string, string>>('warm', 'resources', 'item-id-to-name');
   }
 
   const wasAvailable = itemsAvailable;
@@ -349,6 +464,9 @@ async function processActiveAuctions(): Promise<void> {
       knownItemNames = new Set(itemNamesCache.data);
       lastItemNamesCacheAge = itemNamesCache.cache_age_seconds;
     }
+  }
+  if (idToNameCache) {
+    knownItemIds = new Set(Object.keys(idToNameCache.data));
   }
   const nameToId = nameToIdCache?.data ?? {};
 
@@ -363,7 +481,7 @@ async function processActiveAuctions(): Promise<void> {
       const newBase = extractBaseItem(auction.item_name);
       if (newBase !== auction.base_item || !auction.skyblock_id) {
         auction.base_item = newBase;
-        auction.skyblock_id = nameToId[newBase] ?? null;
+        auction.skyblock_id = resolveSkyblockId(newBase, auction.extra, nameToId);
       }
     }
     needsReprocess = false;
@@ -615,6 +733,37 @@ async function processActiveAuctions(): Promise<void> {
 
     previousLowestBins = lowestBins;
 
+    // --- Price snapshot insertion (full pass only, event-driven, sparse) ---
+    if (fullPass) {
+      const snapshotRows = buildPriceSnapshotRows(lowestBins);
+      if (snapshotRows.length > 0) {
+        // Enrich with sale data, insert to DB, and publish events
+        void enrichWithSaleData(snapshotRows, 120).then(() => {
+          // Publish real-time price snapshot events for frontends
+          const priceEvents: Array<{ channel: EventChannel; event: EventPayload }> = snapshotRows.map((row) => ({
+            channel: 'auction:price-updates' as EventChannel,
+            event: {
+              type: 'auction:price-snapshot' as const,
+              base_item: row.base_item,
+              skyblock_id: row.skyblock_id,
+              lowest_bin: row.lowest_bin,
+              median_bin: row.median_bin,
+              listing_count: row.listing_count,
+              sale_count: row.sale_count,
+              avg_sale_price: row.avg_sale_price,
+              timestamp: ts,
+            },
+          }));
+          void publishBatch(priceEvents).catch((err) => log.warn({ err }, 'Failed to publish price snapshot events'));
+
+          // Insert to Postgres
+          postgrestInsert('auction_price_snapshots', snapshotRows)
+            .then(() => log.debug({ count: snapshotRows.length }, 'Inserted sparse price snapshots'))
+            .catch((err) => log.error({ err }, 'Failed to insert auction price snapshots'));
+        });
+      }
+    }
+
     // Compute auction change percentages
     const totalTracked = allTracked.size + added; // approximate pre-change total
     const addedPct = totalTracked > 0 ? Math.round((added / totalTracked) * 10000) / 100 : 0;
@@ -748,4 +897,35 @@ export function startAuctionScanner(): void {
 
   startEndingSoonChecker();
   startEndedAuctionsChecker();
+
+  // Price snapshot aggregation + retention (every 10 minutes, offset 30s)
+  setTimeout(() => {
+    void runAuctionAggregation();
+    setInterval(() => void runAuctionAggregation(), 10 * 60 * 1000);
+  }, 30_000);
+
+  // Startup: check for stale data and rebuild if needed
+  void (async () => {
+    try {
+      const rows = await postgrestSelect<{ recorded_at: string }>({
+        table: 'auction_price_snapshots',
+        select: 'recorded_at',
+        order: 'recorded_at.desc',
+        limit: 1,
+      });
+      const lastRecorded = rows.length > 0 ? new Date(rows[0]!.recorded_at).getTime() : 0;
+      const staleMs = 10 * 60 * 1000;
+      if (Date.now() - lastRecorded > staleMs) {
+        const gapStart = rows.length > 0
+          ? rows[0]!.recorded_at
+          : new Date(Date.now() - 48 * 3600_000).toISOString();
+        const gapEnd = new Date().toISOString();
+        log.info({ gapStart }, 'Stale snapshot data detected — rebuilding hourly summaries');
+        await postgrestRpc('auction_price_rebuild', { p_start: gapStart, p_end: gapEnd, p_granularity: 'hourly' });
+        log.info('Rebuild completed');
+      }
+    } catch (err) {
+      log.warn({ err }, 'Startup stale-data check failed');
+    }
+  })();
 }

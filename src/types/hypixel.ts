@@ -200,7 +200,10 @@ export interface HypixelItemsResponse {
     category?: string;
     npc_sell_price?: number;
     color?: string;
-    skin?: string;
+    skin?: string | { value: string; signature?: string };
+    durability?: number;
+    item_model?: string;
+    glowing?: boolean;
     museum?: boolean;
     [key: string]: unknown;
   }>;

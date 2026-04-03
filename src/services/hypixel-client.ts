@@ -210,7 +210,6 @@ export async function fetchFireSales(): Promise<HypixelFireSalesResponse> {
 export async function fetchNews(): Promise<HypixelNewsResponse> {
   return fetchHypixel<HypixelNewsResponse>({
     endpoint: '/v2/skyblock/news',
-    noApiKey: true,
   });
 }
 

@@ -29,13 +29,18 @@ function matchesFilter(event: EventPayload, sub: Subscription): boolean {
   const filter = sub.filter;
   const eventRecord = event as unknown as Record<string, unknown>;
 
-  // Item filter: match item_id or item_name against the list
+  // Item filter: match item_id, item_name, base_item, or skyblock_id against the list
   if (filter.item_ids && filter.item_ids.length > 0) {
     const eventItemId = (eventRecord['item_id'] as string | undefined) ?? '';
     const eventItemName = (eventRecord['item_name'] as string | undefined) ?? '';
+    const eventBaseItem = (eventRecord['base_item'] as string | undefined) ?? '';
+    const eventSkyblockId = (eventRecord['skyblock_id'] as string | undefined) ?? '';
     const matched = filter.item_ids.some((id) => {
       const lower = id.toLowerCase();
-      return eventItemId.toLowerCase() === lower || eventItemName.toLowerCase() === lower;
+      return eventItemId.toLowerCase() === lower
+        || eventItemName.toLowerCase() === lower
+        || eventBaseItem.toLowerCase() === lower
+        || eventSkyblockId.toLowerCase() === lower;
     });
     if (!matched) return false;
   }
@@ -81,7 +86,7 @@ interface SubscribeMessage {
 const ALL_CHANNELS: EventChannel[] = [
   'bazaar:alerts',
   'auction:alerts', 'auction:sold', 'auction:new-listing',
-  'auction:lowest-bin-change', 'auction:ending',
+  'auction:lowest-bin-change', 'auction:price-updates', 'auction:ending',
   'profile:changes',
 ];
 

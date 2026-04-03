@@ -8,6 +8,7 @@ export type EventChannel =
   | 'auction:sold'
   | 'auction:new-listing'
   | 'auction:lowest-bin-change'
+  | 'auction:price-updates'
   | 'profile:changes';
 
 export interface BazaarAlertEvent {
@@ -83,6 +84,18 @@ export interface AuctionLowestBinChangeEvent {
   timestamp: number;
 }
 
+export interface AuctionPriceSnapshotEvent {
+  type: 'auction:price-snapshot';
+  base_item: string;
+  skyblock_id: string | null;
+  lowest_bin: number;
+  median_bin: number | null;
+  listing_count: number;
+  sale_count: number;
+  avg_sale_price: number | null;
+  timestamp: number;
+}
+
 export interface ProfileChangeEvent {
   type: 'profile:change';
   player_uuid: string;
@@ -98,15 +111,21 @@ export type EventPayload =
   | AuctionSoldEvent
   | AuctionNewListingEvent
   | AuctionLowestBinChangeEvent
+  | AuctionPriceSnapshotEvent
   | ProfileChangeEvent;
 
 type EventHandler = (channel: string, event: EventPayload) => void;
+
+interface ChannelHandler {
+  channel: EventChannel;
+  handler: EventHandler;
+}
 
 // Separate Redis connection for pub/sub (ioredis requirement —
 // a client in subscriber mode can't run other commands)
 let pubClient: Redis | null = null;
 let subClient: Redis | null = null;
-const handlers: EventHandler[] = [];
+const handlers: ChannelHandler[] = [];
 let messageListenerAttached = false;
 
 function getPubClient(): Redis {
@@ -120,11 +139,11 @@ function getSubClient(): Redis {
   if (!subClient) {
     subClient = new Redis(env.REDIS_URL, { maxRetriesPerRequest: 3 });
 
-    // Attach message listener once
+    // Attach message listener once — dispatch only to handlers matching the channel
     subClient.on('message', (ch: string, message: string) => {
       const event = JSON.parse(message) as EventPayload;
       for (const h of handlers) {
-        h(ch, event);
+        if (h.channel === ch) h.handler(ch, event);
       }
     });
     messageListenerAttached = true;
@@ -149,7 +168,7 @@ export async function publishBatch(events: Array<{ channel: EventChannel; event:
 
 export async function subscribe(channel: EventChannel, handler: EventHandler): Promise<void> {
   const client = getSubClient();
-  handlers.push(handler);
+  handlers.push({ channel, handler });
   void messageListenerAttached; // listener is set up in getSubClient
   await client.subscribe(channel);
 }

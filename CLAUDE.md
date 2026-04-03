@@ -69,6 +69,13 @@ All phases complete. Remaining: bazaar data retention (deferred), additional rou
 - [x] v1 museum, garden, bingo, firesales, news endpoints
 - [x] Bingo goals resource endpoint (public)
 - [x] resourceNotFound error factory, graceful shutdown, background refresh logging
+- [x] Auction browse/search endpoint (GET /v2/skyblock/auctions/browse) with text search, category/tier/BIN/price filters, sorting, pagination, optional item_bytes
+- [x] buyer_uuid index on auction_history (migration 011)
+- [x] Auction price history: periodic lowest-BIN snapshots + hourly aggregation + backfill from existing sales (migration 012)
+- [x] Auction price history endpoint (GET /v2/skyblock/auctions/price-history/:item) with range, ETag/304, Cache-Control
+- [x] Auction price history v2: sparse storage, 3-tier resolution (raw/minute/hourly), unified summaries table (migration 013)
+- [x] Auction price rebuild from auction_history on startup stale-data detection
+- [x] Real-time auction price events (auction:price-updates channel, SSE + WebSocket)
 
 ## What works
 - Step 1: `tsc --noEmit` passes, server boots with env vars set, exits cleanly on timeout

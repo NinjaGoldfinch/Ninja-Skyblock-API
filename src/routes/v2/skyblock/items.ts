@@ -2,7 +2,7 @@ import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { cacheGet } from '../../../services/cache-manager.js';
 import { enforceClientRateLimit } from '../../../services/rate-limiter.js';
 import { errors } from '../../../utils/errors.js';
-import type { ProcessedItem } from '../../../workers/resource-items.js';
+import type { ProcessedItem, ItemTextureData, TextureType } from '../../../workers/resource-items.js';
 
 interface ItemParams {
   itemId: string;
@@ -33,6 +33,32 @@ export async function v2ItemsRoute(app: FastifyInstance): Promise<void> {
     }
 
     throw errors.validation('Items data not available yet. The resource worker may not have run.');
+  });
+
+  // GET /v2/skyblock/items/textures — compact texture map for all items
+  app.get('/v2/skyblock/items/textures', {
+    schema: {
+      tags: ['skyblock'],
+      summary: 'Get item texture map',
+      description: 'Returns a compact mapping of item ID to texture data for frontend icon rendering. Includes texture type (vanilla/skull/leather/item_model), material, decoded skin URLs, and RGB color values.',
+      response: {
+        200: { type: 'object', properties: { success: { type: 'boolean' }, data: { type: 'object', additionalProperties: true }, meta: { $ref: 'response-meta#' } } },
+        400: { $ref: 'error-response#' },
+      },
+    },
+  }, async (request: FastifyRequest) => {
+    await enforceClientRateLimit(request.clientId, request.clientRateLimit);
+
+    const cached = await cacheGet<Record<string, ItemTextureData & { type: TextureType }>>('warm', 'resources', 'item-textures');
+    if (cached) {
+      return {
+        success: true,
+        data: cached.data,
+        meta: { cached: true, cache_age_seconds: cached.cache_age_seconds, timestamp: Date.now() },
+      };
+    }
+
+    throw errors.validation('Item texture data not available yet. The resource worker may not have run.');
   });
 
   // GET /v2/skyblock/items/:itemId — single item by ID
